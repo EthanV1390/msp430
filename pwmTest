@@ -1,0 +1,69 @@
+//Ethan Van Deusen
+//Modifiable Timing Light
+//2-21-24
+
+/*Configuration:
+      Using External 32.768kHz watch crystal
+      Clock source: ACLK
+      Timer: Timer0_A3
+*/
+
+//Currently working for frequency, Have to figure out what to do about decimal values for frequency.
+//At least have to figure out how to get duty cycle to work if not using decimals
+
+
+#include <msp430.h>
+
+#define clkFreq (0x8000)    //Constant to represent the external crystal's frequency
+#define D2      (0x08)      //00001000, all off except for the D segment for D2 LED
+#define A3_CTRL (0x04)      //00000100, All inputs
+
+// Represents user inputs for frequency and duty cycle, will be replaced later with actual inputs
+#define inputFreq 60         //60Hz Freq, 546 pwmPeriod
+#define inputDC   50        //50% Duty Cycle
+
+// Function to convert an inputed frequency into the value for timer register
+float freqCalc(float freq)
+{
+    float period;
+    period = clkFreq/freq;
+    return period;
+}
+
+// Function to convert an inputed duty cycle percentage into the value for timer register
+int dcCalc(int dc, int period){
+    //Duty cycle percentage = period/TA0CCR1
+    int dcPercent;
+    dcPercent = period * (dc/100);
+    return dcPercent;
+}
+
+int main(void)
+{
+	WDTCTL = WDTPW | WDTHOLD;
+	int pwmPeriod;
+    int dutyCycle;
+
+//P3 Configuration
+    P3DIR = 0xFF;  //Set all 8 low side port pins to outputs The other segments will be off.
+    P3OUT = D2;    //Allows LED D2 to turn on
+
+//P1 Configuration
+    P1DIR |= A3_CTRL;     //Init all of the Ax_CTRL pins to inputs except A3_CTRL for D2 LED
+    P1OUT = 0;            //Init them all off before the main loop, keeps segments from fading in and out.
+    P1SEL |= BIT2;        //Select P1.2 as timer output instead of GPIO
+
+    pwmPeriod = freqCalc(inputFreq);
+    dutyCycle = dcCalc(inputDC, pwmPeriod);
+
+//Set up Timer0_A3
+    //TA0CCR0 = (32768);                //Set PWM period    Freq = 1Hz
+    TA0CCR0 = (pwmPeriod);                    //Set PWM period    Freq = 60Hz
+    TA0CCR1 = (TA0CCR0>>1);             //Set duty cycle.   Duty Cycle = 50%
+    TA0CCTL1 = OUTMOD_7;                //Set timer's output mode to reset/set
+    TA0CTL = TASSEL_1 + MC_1 + TACLR;   //Select ACLK, Up mode, Clear timer count
+    BCSCTL3 = XCAP_3;                   //Set capacitor to 12.5pF for crystal
+    __bis_SR_register(LPM3_bits);       //Enter LPM3
+
+	return 0;
+}
