@@ -1,6 +1,5 @@
 //Ethan Van Deusen
-//Modifiable Timing Light
-//2-21-24
+//Uses a PWM signal to flash LED D2
 
 /*Configuration:
       Using External 32.768kHz watch crystal
@@ -8,24 +7,19 @@
       Timer: Timer0_A3
 */
 
-//Currently working for frequency, Have to figure out what to do about decimal values for frequency.
-//At least have to figure out how to get duty cycle to work if not using decimals
-
-//First clock cycle doesn't toggle LED until end of cycle(TA0CCR0), should be toggling at TA0CCR1. It does this correctly for every other time just not the first one.
-//Decimal values for period, 60Hz is technically 546.133 but 546 is stored in the register
-//Should variables be static?
-
 #include <msp430.h>
 
-//#define clkFreq (0x8000)    //Constant to represent the external crystal's frequency54
-#define D2      (0x08)      //00001000, all off except for the D segment for D2 LED
-#define A3_CTRL (0x04)      //00000100, all inputs
+#define externClkFreq (32768)
+#define prescl        (8)
+
+#define D2      (0x08)  //00001000, all off except for the D segment for D2 LED
+#define A3_CTRL (0x04)  //00000100, all inputs
 
 // Represents user inputs for frequency and duty cycle, will be replaced later with actual inputs
-//#define inputFreq 60         //60Hz Freq, 546 pwmPeriod
-#define inputDC   50        //50% Duty Cycle
+float inputFreq = 1;
+float inputDC = 50;
 
-// Function to convert an inputed frequency into the value for timer register
+// Function to convert an inputed frequency into period
 unsigned int periodCalc(float freq, unsigned int clkFreq, unsigned int prescaler)
 {
     float periodInSec = 1.0 / freq;  // Calculate the period in seconds
@@ -34,33 +28,28 @@ unsigned int periodCalc(float freq, unsigned int clkFreq, unsigned int prescaler
 }
 
 // Function to convert an inputed duty cycle percentage into the value for timer register
-unsigned int dcCalc(float dc, unsigned int period){
+unsigned int dcCalc(float dc, unsigned int period)
+{
     //Duty cycle percentage = period/TA0CCR1
     float dcPercent;
-    dcPercent = period * (dc/100);
+    dcPercent = period * (1-(dc/100));
     return dcPercent;
 }
 
 void setupTimerA0(void)
 {
-   TA0CCTL1 = OUTMOD_7;                //Set timer's output mode to reset/set
+   TA0CCTL1 = OUTMOD_3;                //Set timer's output mode to set/reset
    TA0CTL = TASSEL_1 + MC_1 + TACLR + ID_3;   //Select ACLK, Up mode, Clear timer count, Prescaler of 8
    BCSCTL3 = XCAP_3;                   //Set capacitor to 12.5pF for crystal
 }
 
 int main(void)
 {
-	WDTCTL = WDTPW | WDTHOLD;
-	unsigned int clkFreq = 32768;   // Clock frequency in Hz
-	float inputFreq = 1;            // Desired frequency in Hz
-	unsigned int prescaler = 8;     // Prescaler value
+    WDTCTL = WDTPW | WDTHOLD;
 
-	setupTimerA0();
-
-    unsigned int period = periodCalc(inputFreq, clkFreq, prescaler);
+    setupTimerA0();
+    unsigned int period = periodCalc(inputFreq, externClkFreq, prescl);
     unsigned int dutyCycle = dcCalc(inputDC, period);
-
-
 
 //P3 Configuration
     P3DIR = 0xFF;  //Set all 8 low side port pins to outputs The other segments will be off.
@@ -71,13 +60,20 @@ int main(void)
     P1OUT = 0;            //Init them all off before the main loop, keeps segments from fading in and out.
     P1SEL |= BIT2;        //Select P1.2 as timer output instead of GPIO
 
-
 //Set up Timer0_A3
-    //TA0CCR0 = (32768);                //Set PWM period    Freq = 1Hz
-    TA0CCR0 = (period);                    //Set PWM period
+//Timer counts up from 0 to TA0CCR0. Once it hits TA0CCR1 the light is turned on. When it reaches TA0CCR0 light turns off and timer resets.
+    TA0CCR0 = (period);                //Set PWM period
     TA0CCR1 = (dutyCycle);             //Set duty cycle.   Duty Cycle = 50%
-
-    __bis_SR_register(LPM3_bits);       //Enter LPM3
-	return 0;
+   // __bis_SR_register(LPM3_bits);      //Enter LPM3
+    return 0;
 }
+
+
+
+
+
+
+
+
+
 
