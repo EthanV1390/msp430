@@ -1,0 +1,256 @@
+/*
+    Ethan Van Deusen
+    Modifiable Timing Light
+    2-21-24
+    main.c
+
+*/
+#include <msp430.h>
+
+//Arrays that contain hex values for controlling segments to display specific characters on the 7SD
+const unsigned char ucCharToHex[] = {0x3f, 0x06, 0x5b, 0x4f, 0x66, 0x6d, 0x7d, 0x07, 0x7f, 0x6f, 0x40, 0x39, 0x71, 0x76, 0x31, 0x3f, 0x54, 0x79, 0x5e, 0x6e};
+/*  Index reference
+  0:  0x3f    10 -:  0x40
+  1:  0x06    11 C:  0x39
+  2:  0x5b    12 F:  0x71
+  3:  0x4f    13 H:  0x76
+  4:  0x66    14 r:  0x31
+  5:  0x6d    15 O:  0x3f
+  6:  0x7d    16 n:  0x54
+  7:  0x07    17 E:  0x79
+  8:  0x7f    18 d:  0x5e
+  9:  0x6f    19 y:  0x6e
+*/
+
+//Port 1, 7-segment display segment control
+    #define A_CTRL  BIT0    //Segment A
+    #define B_CTRL  BIT1    //Segment B
+    #define C_CTRL  BIT2    //Segment C
+    #define D_CTRL  BIT3    //Segment D
+    #define E_CTRL  BIT4    //Segment E
+    #define F_CTRL  BIT5    //Segment F
+    #define G_CTRL  BIT6    //Segment G
+    #define DP_CTRL BIT7    //Segment DP
+
+//Port 3, 7-segment display anode(digit) control
+    #define A1_CTRL BIT0    // Digit 1
+    #define A2_CTRL BIT1    // Digit 2
+    #define A3_CTRL BIT2    // Colon, LED's, deg sign
+    #define A4_CTRL BIT3    // Digit 3
+    #define A5_CTRL BIT4    // Digit 4
+
+typedef enum
+{
+    dispInit,        // Initial state
+    dispDigit1,      // Anode 1, digit 1
+    dispDigit2,      // Anode 2, digit 2
+    dispDigit3,      // Anode 3, colon, degree symbol, and LED's
+    dispDigit4,      // Anode 4, digit 3
+    dispDigit5       // Anode 5, digit 4
+} DisplayState;
+
+volatile static DisplayState dispState = dispInit;      //Variable called 'dispState' of type 'DisplayState' used for changing digits on 7SD. dispInit sets UpdateDisplay() to default
+volatile unsigned int uiTimerTick = 0;                  //Timer counter
+
+#define D2      (0x08)
+
+#define externClkFreq (32768)
+int prescl = 1;         //Default prescaler 1
+
+//Variables for easily setting a digit's character from ucCharToHex[]
+volatile static int digit1Val = 14;
+volatile static int digit2Val = 17;
+volatile static int digit3Val = 18;
+volatile static int digit4Val = 19;
+
+
+//Timer Setup functions
+    //Timer A0
+    void setupTimerA0(void) //Timer0_A3 setup function
+    {
+       TA0CCTL1 = OUTMOD_3;                     //Set timer's output mode to set/reset
+       TA0CTL = TASSEL_1 + MC_1 + TACLR + ID_0; //Select ACLK, Up mode, Clear timer count, Prescaler of 1
+       BCSCTL3 = XCAP_3;                        //Set capacitor to 12.5pF for crystal
+
+       if (inputFreq < 1)   //Dynamic prescaler to represent full range
+       {
+           prescl = 8;      // Set calculation prescaler
+           TA0CTL |= ID_3;  // Set timers prescaler to 8
+       }
+    }
+    //TimerA1
+    void setupTimerA1(void)
+    {
+      TA1CTL = TACLR;                       // Stop the timer and clear it first
+      TA1CCR0 = 400;                        // Timer period register,   400 / 8MHZ = 50us
+      TA1CTL = TASSEL_2 + MC_1;             // SMCLK, count-up mode
+      TA1CCTL0 = CCIE;                      // Enable Timer1_A2 CCR0 interrupt
+      __bis_SR_register(GIE);
+    }
+    // TimerA1, TA1CCR0 Register Interrupt
+    #pragma vector=TIMER1_A0_VECTOR
+    __interrupt void Timer1_A0 (void)
+    {
+        uiTimerTick++;                      // Every interrupt increment counter, used for how long an individual digit should be on/off
+    }
+
+float inputFreq = 0.5;
+float inputDC = 90;
+
+unsigned int periodCalc(float freq, unsigned int clkFreq, unsigned int prescaler)     // Converts inputed frequency into TA0CCR0
+{
+    float periodInSec = 1.0 / freq;                                                   // Calculate the period in seconds
+    unsigned int periodInCycles = (unsigned int)(periodInSec * clkFreq / prescaler);  // Convert to clock cycles
+    return periodInCycles;
+}
+unsigned int dcCalc(float dc, unsigned int period)                                    // Converts inputed duty cycle into TA0CCR1
+{
+    float dcPercent;
+    dcPercent = period * (1-(dc/100));
+    return dcPercent;
+}
+
+
+    void pwm(void)
+    {
+        //P3 Configuration
+            P3DIR = D2;  //Set all 8 low side port pins to outputs The other segments will be off.
+            P3OUT = D2;    //Allows LED D2 to turn on
+
+        //P1 Configuration
+            P1DIR = A3_CTRL;     //Init all of the Ax_CTRL pins to inputs except A3_CTRL for D2 LED
+            P1OUT = 0;            //Init them all off before the main loop, keeps segments from fading in and out.
+            P1SEL = BIT2;        //Select P1.2 as timer output instead of GPIO
+
+
+            unsigned int period = periodCalc(inputFreq, externClkFreq, prescl);
+            unsigned int dutyCycle = dcCalc(inputDC, period);
+
+        //Assign timer registers
+            TA0CCR0 = (period);
+            TA0CCR1 = (dutyCycle);
+
+
+    }
+
+    void updateDisplay(void)
+    {
+        static unsigned int uiLastTick = 0; // Timer counter to compare against uiTimerTick for waiting
+        switch (dispState)
+        {
+            case dispInit:  //Default setup state
+            default:
+            {
+
+                P1OUT &= ~(A1_CTRL | A2_CTRL | A3_CTRL | A4_CTRL | A5_CTRL);
+                P3OUT &= ~(A_CTRL | B_CTRL | C_CTRL | D_CTRL | E_CTRL | F_CTRL | G_CTRL | DP_CTRL);
+                uiLastTick = uiTimerTick;
+
+                // Set P1 and P3 to output
+                P3DIR = 0xFF;
+                P1DIR = 0xFF;
+                dispState = dispDigit1;
+            }
+            break;
+            case dispDigit1:
+            {
+                if ((uiTimerTick - uiLastTick) >= 1)
+                    {
+                        P3OUT = ucCharToHex[digit1Val];            // Segment data
+                        P1OUT = A1_CTRL;         // Select first digit
+                    }
+                if ((uiTimerTick - uiLastTick) >= 8)
+                    {
+                        uiLastTick = uiTimerTick;
+                        dispState = dispDigit2;
+                        P1OUT &= ~A1_CTRL;       // Turn off anode 1
+                    }
+            }
+            break;
+            case dispDigit2:
+            {
+                if ((uiTimerTick - uiLastTick) >= 1)
+                    {
+                        P3OUT = ucCharToHex[digit2Val];            // Segment data
+                        P1OUT = A2_CTRL;         // Select second digit
+                    }
+                if ((uiTimerTick - uiLastTick) >= 8)
+                    {
+                        uiLastTick = uiTimerTick;
+                        dispState = dispDigit3;
+                        P1OUT &= ~A2_CTRL;       // Turn off anode 2
+                    }
+            }
+            break;
+            case dispDigit3:
+            {
+
+//                if ((uiTimerTick - uiLastTick) >= 1)
+//                    {
+
+//                    }
+//                if ((uiTimerTick - uiLastTick) >= 8)
+//                    {
+                  dispState = dispDigit4;
+//                    }
+            }
+            break;
+            case dispDigit4:
+            {
+                if ((uiTimerTick - uiLastTick) >= 1)
+                    {
+                        P3OUT = ucCharToHex[digit3Val];            // Segment data
+                        P1OUT = A4_CTRL;         // Select third digit
+                    }
+                if ((uiTimerTick - uiLastTick) >= 8)
+                    {
+                        uiLastTick = uiTimerTick;
+                        dispState = dispDigit5;
+                        P1OUT &= ~A4_CTRL;       // Turn off anode 4
+                    }
+            }
+            break;
+            case dispDigit5:
+            {
+                if ((uiTimerTick - uiLastTick) >= 1)
+                    {
+                        P3OUT = ucCharToHex[digit4Val];            // Segment data
+                        P1OUT = A5_CTRL;         // Select fifth digit
+                    }
+                if ((uiTimerTick - uiLastTick) >= 8)
+                    {
+                        uiLastTick = uiTimerTick;
+                        dispState = dispDigit1;
+                        P1OUT &= ~A5_CTRL;       // Turn off anode 5
+                    }
+            }
+            break;
+        }
+    }
+
+
+
+int main(void)
+{
+	WDTCTL = WDTPW | WDTHOLD;
+	setupTimerA0();
+    setupTimerA1();
+    pwm();
+
+
+    while(1)
+    {
+        updateDisplay();
+
+    }
+}
+
+
+
+
+
+
+
+
+
+
