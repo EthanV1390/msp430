@@ -2,7 +2,7 @@
     Ethan Van Deusen
     Reference code that displays different characters on multiple digits of the Seven-Segment Display
 
-    Uses a timer interrupt to keep each digit on for a small amount of time(600us) and then turns it off while turning on the next digit.
+    Uses a timer interrupt to keep each digit on for a small amount of time(400us) and then turns it off while turning on the next digit.
     Doing this for each digit really fast gives the look of all 4 digits on at once
 
     Configuration:
@@ -14,19 +14,18 @@
 #include <msp430.h>
 
 //Arrays that contain hex values for controlling segments to display specific characters on the 7SD
-const unsigned char ucNumToHex[] = {0x3f, 0x06, 0x5b, 0x4f, 0x66, 0x6d, 0x7d, 0x07, 0x7f, 0x6f};
-const unsigned char ucCharToHex[] = {0x40, 0x39, 0x71, 0x76, 0x31, 0x3f, 0x54, 0x79, 0x5e, 0x6e};
+const unsigned char ucCharToHex[] = {0x3f, 0x06, 0x5b, 0x4f, 0x66, 0x6d, 0x7d, 0x07, 0x7f, 0x6f, 0x40, 0x39, 0x71, 0x76, 0x31, 0x3f, 0x54, 0x79, 0x5e, 0x6e};
 /*  Index reference
-  0:  0x3f    -:  0x40
-  1:  0x06    C:  0x39
-  2:  0x5b    F:  0x71
-  3:  0x4f    H:  0x76
-  4:  0x66    r:  0x31
-  5:  0x6d    O:  0x3f
-  6:  0x7d    n:  0x54
-  7:  0x07    E:  0x79
-  8:  0x7f    d:  0x5e
-  9:  0x6f    y:  0x6e
+  0:  0x3f    10 -:  0x40
+  1:  0x06    11 C:  0x39
+  2:  0x5b    12 F:  0x71
+  3:  0x4f    13 H:  0x76
+  4:  0x66    14 r:  0x31
+  5:  0x6d    15 O:  0x3f
+  6:  0x7d    16 n:  0x54
+  7:  0x07    17 E:  0x79
+  8:  0x7f    18 d:  0x5e
+  9:  0x6f    19 y:  0x6e
 */
 
 //Port 1, segment control
@@ -59,20 +58,20 @@ typedef enum
 volatile static DisplayState dispState = dispInit;      //Variable called 'dispState' of type 'DisplayState' used for changing digits on 7SD. dispInit sets UpdateDisplay() to default
 volatile unsigned int uiTimerTick = 0;                  //Timer counter
 
-/* Need to
- * 3. Clean up code
- * 5. Write explanation of how it all works
- * 6. Combine into main project
- * 7. Write code to link display to preset
- */
+//Variables for easily setting a digit's character from ucCharToHex[]
+volatile static int digit1Val = 14;
+volatile static int digit2Val = 17;
+volatile static int digit3Val = 18;
+volatile static int digit4Val = 19;
+
 
 // Setup function for Timer1
 void SetupTimerA1(void)
 {
-  TA1CTL = TACLR;                   // Stop the timer and clear it first
-  TA1CCR0 = 400;                    // 400 = (x)us / (1/8MHz) (main timer tick)     How many seconds does a value of 400 correspond too?
-  TA1CTL = TASSEL_2 + MC_1;         // SMCLK, count-up mode
-  TA1CCTL0 = CCIE;                  // Enable Timer1_A2 CCR0 interrupt
+  TA1CTL = TACLR;                       // Stop the timer and clear it first
+  TA1CCR0 = 400;                        // Timer period register,   400 / 8MHZ = 50us
+  TA1CTL = TASSEL_2 + MC_1;             // SMCLK, count-up mode
+  TA1CCTL0 = CCIE;                      // Enable Timer1_A2 CCR0 interrupt
   __bis_SR_register(GIE);
 }
 
@@ -80,7 +79,7 @@ void SetupTimerA1(void)
 #pragma vector=TIMER1_A0_VECTOR
 __interrupt void Timer1_A0 (void)
 {
-    uiTimerTick++;          // Every interrupt increment counter, used for how long an individual digit should be on/off
+    uiTimerTick++;                      // Every interrupt increment counter, used for how long an individual digit should be on/off
 }
 
 void UpdateDisplay(void)
@@ -88,10 +87,10 @@ void UpdateDisplay(void)
     static unsigned int uiLastTick = 0; // Timer counter to compare against uiTimerTick for waiting
     switch (dispState)
     {
-        case dispInit:
+        case dispInit:  //Default setup state
         default:
         {
-            P1OUT &= ~ (A1_CTRL | A2_CTRL | A3_CTRL | A4_CTRL | A5_CTRL);
+            P1OUT &= ~(A1_CTRL | A2_CTRL | A3_CTRL | A4_CTRL | A5_CTRL);
             P3OUT &= ~(A_CTRL | B_CTRL | C_CTRL | D_CTRL | E_CTRL | F_CTRL | G_CTRL | DP_CTRL);
             uiLastTick = uiTimerTick;
 
@@ -105,7 +104,7 @@ void UpdateDisplay(void)
         {
             if ((uiTimerTick - uiLastTick) >= 1)
                 {
-                    P3OUT = ucCharToHex[2];            // Segment data
+                    P3OUT = ucCharToHex[digit1Val];            // Segment data
                     P1OUT = A1_CTRL;         // Select first digit
                 }
             if ((uiTimerTick - uiLastTick) >= 8)
@@ -120,7 +119,7 @@ void UpdateDisplay(void)
         {
             if ((uiTimerTick - uiLastTick) >= 1)
                 {
-                    P3OUT = ucCharToHex[7];            // Segment data
+                    P3OUT = ucCharToHex[digit2Val];            // Segment data
                     P1OUT = A2_CTRL;         // Select second digit
                 }
             if ((uiTimerTick - uiLastTick) >= 8)
@@ -150,7 +149,7 @@ void UpdateDisplay(void)
         {
             if ((uiTimerTick - uiLastTick) >= 1)
                 {
-                    P3OUT = ucNumToHex[0];            // Segment data
+                    P3OUT = ucCharToHex[digit3Val];            // Segment data
                     P1OUT = A4_CTRL;         // Select third digit
                 }
             if ((uiTimerTick - uiLastTick) >= 8)
@@ -165,7 +164,7 @@ void UpdateDisplay(void)
         {
             if ((uiTimerTick - uiLastTick) >= 1)
                 {
-                    P3OUT = ucNumToHex[1];            // Segment data
+                    P3OUT = ucCharToHex[digit4Val];            // Segment data
                     P1OUT = A5_CTRL;         // Select fifth digit
                 }
             if ((uiTimerTick - uiLastTick) >= 8)
@@ -179,7 +178,8 @@ void UpdateDisplay(void)
     }
 }
 
-// Call timer setup function, counter(uiTimerTick) is incremented every 75us. This is used to keep the digits on for 8 ticks(8 interrupts so 600us) and then turn off while setting the next anode.
+// Call timer setup function, counter(uiTimerTick) is incremented every 50us.
+// This is used to keep the digits on for 8 ticks(8 interrupts so 400us) and then turn off while setting the next anode.
 // UpdateDisplay is running constantly and the counter cycles through the case statements to change the digits
 void main(void){
 
@@ -191,17 +191,3 @@ void main(void){
            UpdateDisplay();
        }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
