@@ -1,73 +1,91 @@
-//Ethan Van Deusen
-//Attempting to display E on digit 1 and F on digit 2 at the same time.
+/*
+    Ethan Van Deusen
+    Reference code that displays different characters on multiple digits of the Seven-Segment Display
+
+    Uses a timer interrupt to keep each digit on for a small amount of time(600us) and then turns it off while turning on the next digit.
+    Doing this for each digit really fast gives the look of all 4 digits on at once
+
+    Configuration:
+         Timer: Timer1_A2
+         Timer source: SMCLK
+         Clock source: DCO 8MHz
+*/
 
 #include <msp430.h>
 
-#define ESeg (0x79)         //01111001 On: A, F, G, E, D    Off: B, C, DP
-#define FSeg (0x71)         //01110001 On: A, F, G, E       Off: B, C, D, DP
-#define OneSeg (0x06)       //00000110 On: B, C             Off: A, F, G, E, D, DP
-#define ZeroSeg (0x3F)      //10111111 On: A, B, C, D, E, F, DP             Off: G
+//Arrays that contain hex values for controlling segments to display specific characters on the 7SD
+const unsigned char ucNumToHex[] = {0x3f, 0x06, 0x5b, 0x4f, 0x66, 0x6d, 0x7d, 0x07, 0x7f, 0x6f};
+const unsigned char ucCharToHex[] = {0x40, 0x39, 0x71, 0x76, 0x31, 0x3f, 0x54, 0x79, 0x5e, 0x6e};
+/*  Index reference
+  0:  0x3f    -:  0x40
+  1:  0x06    C:  0x39
+  2:  0x5b    F:  0x71
+  3:  0x4f    H:  0x76
+  4:  0x66    r:  0x31
+  5:  0x6d    O:  0x3f
+  6:  0x7d    n:  0x54
+  7:  0x07    E:  0x79
+  8:  0x7f    d:  0x5e
+  9:  0x6f    y:  0x6e
+*/
 
-// Define the digit select codes for the first and second digits
-#define A1_CTRL         BIT0    //Digit 1
-#define A2_CTRL         BIT1    //Digit 2
-#define A3_CTRL         BIT2    //Colon, LED's, deg sign
-#define A4_CTRL         BIT3    //Digit 3
-#define A5_CTRL         BIT4    //Digit 4
+//Port 1, segment control
+    #define A_CTRL  BIT0
+    #define B_CTRL  BIT1
+    #define C_CTRL  BIT2
+    #define D_CTRL  BIT3
+    #define E_CTRL  BIT4
+    #define F_CTRL  BIT5
+    #define G_CTRL  BIT6
+    #define DP_CTRL BIT7
 
-#define A_CTRL          BIT0
-#define B_CTRL          BIT1
-#define C_CTRL          BIT2
-#define D_CTRL          BIT3
-#define E_CTRL          BIT4
-#define F_CTRL          BIT5
-#define G_CTRL          BIT6
-#define DP_CTRL         BIT7
+//Port 3, anode control
+    #define A1_CTRL BIT0    // Digit 1
+    #define A2_CTRL BIT1    // Digit 2
+    #define A3_CTRL BIT2    // Colon, LED's, deg sign
+    #define A4_CTRL BIT3    // Digit 3
+    #define A5_CTRL BIT4    // Digit 4
 
 typedef enum
 {
-    dispInit,    /* initialized state */
-    dispDigit1,      /* anode 1, this is the 7-segment MSB, digit 1 */
-    dispDigit2,      /* anode 2, this is the 7-segment digit 2 */
-    dispDigit3,      /* anode 3, this is the 7-segment colon, degree symbol, and discrete LED's */
-    dispDigit4,      /* anode 4, this is the 7-segment digit 3 */
-    dispDigit5       /* anode 5, this is the 7-segment LSB, digit 4 */
+    dispInit,        // Initial state
+    dispDigit1,      // Anode 1, digit 1
+    dispDigit2,      // Anode 2, digit 2
+    dispDigit3,      // Anode 3, colon, degree symbol, and LED's
+    dispDigit4,      // Anode 4, digit 3
+    dispDigit5       // Anode 5, digit 4
 } DisplayState;
 
-volatile static DisplayState dispState = dispInit;
-volatile unsigned int uiTimerTick = 0;
-
-// Currently working, displays 'E' on digit 1 and 'F' on digit 2 at the same time. Uses a timer interrupt to show both at once.
+volatile static DisplayState dispState = dispInit;      //Variable called 'dispState' of type 'DisplayState' used for changing digits on 7SD. dispInit sets UpdateDisplay() to default
+volatile unsigned int uiTimerTick = 0;                  //Timer counter
 
 /* Need to
  * 3. Clean up code
- * 4. Clean up macros
  * 5. Write explanation of how it all works
  * 6. Combine into main project
  * 7. Write code to link display to preset
  */
 
-// Setup function for Timer1_A2
+// Setup function for Timer1
 void SetupTimerA1(void)
 {
-  TA1CTL = TACLR;                   // stop the timer and clear it first
-  TA1CCR0 = 500;                    // 500 = 75us / (1/8MHz) (main timer tick)
+  TA1CTL = TACLR;                   // Stop the timer and clear it first
+  TA1CCR0 = 400;                    // 400 = (x)us / (1/8MHz) (main timer tick)     How many seconds does a value of 400 correspond too?
   TA1CTL = TASSEL_2 + MC_1;         // SMCLK, count-up mode
   TA1CCTL0 = CCIE;                  // Enable Timer1_A2 CCR0 interrupt
   __bis_SR_register(GIE);
-
 }
 
-// Timer1_A2, TA1CCR0 Register Interrupt
+// Timer1, TA1CCR0 Register Interrupt
 #pragma vector=TIMER1_A0_VECTOR
 __interrupt void Timer1_A0 (void)
 {
-    uiTimerTick++;
+    uiTimerTick++;          // Every interrupt increment counter, used for how long an individual digit should be on/off
 }
 
 void UpdateDisplay(void)
 {
-    static unsigned int uiLastTick = 0;
+    static unsigned int uiLastTick = 0; // Timer counter to compare against uiTimerTick for waiting
     switch (dispState)
     {
         case dispInit:
@@ -87,7 +105,7 @@ void UpdateDisplay(void)
         {
             if ((uiTimerTick - uiLastTick) >= 1)
                 {
-                    P3OUT = ESeg;            // Segment data
+                    P3OUT = ucCharToHex[2];            // Segment data
                     P1OUT = A1_CTRL;         // Select first digit
                 }
             if ((uiTimerTick - uiLastTick) >= 8)
@@ -102,7 +120,7 @@ void UpdateDisplay(void)
         {
             if ((uiTimerTick - uiLastTick) >= 1)
                 {
-                    P3OUT = FSeg;            // Segment data
+                    P3OUT = ucCharToHex[7];            // Segment data
                     P1OUT = A2_CTRL;         // Select second digit
                 }
             if ((uiTimerTick - uiLastTick) >= 8)
@@ -132,7 +150,7 @@ void UpdateDisplay(void)
         {
             if ((uiTimerTick - uiLastTick) >= 1)
                 {
-                    P3OUT = ESeg;            // Segment data
+                    P3OUT = ucNumToHex[0];            // Segment data
                     P1OUT = A4_CTRL;         // Select third digit
                 }
             if ((uiTimerTick - uiLastTick) >= 8)
@@ -147,7 +165,7 @@ void UpdateDisplay(void)
         {
             if ((uiTimerTick - uiLastTick) >= 1)
                 {
-                    P3OUT = FSeg;            // Segment data
+                    P3OUT = ucNumToHex[1];            // Segment data
                     P1OUT = A5_CTRL;         // Select fifth digit
                 }
             if ((uiTimerTick - uiLastTick) >= 8)
@@ -161,6 +179,8 @@ void UpdateDisplay(void)
     }
 }
 
+// Call timer setup function, counter(uiTimerTick) is incremented every 75us. This is used to keep the digits on for 8 ticks(8 interrupts so 600us) and then turn off while setting the next anode.
+// UpdateDisplay is running constantly and the counter cycles through the case statements to change the digits
 void main(void){
 
        WDTCTL = WDTPW | WDTHOLD;
