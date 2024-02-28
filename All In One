@@ -23,14 +23,14 @@ const unsigned char ucCharToHex[] = {0x3f, 0x06, 0x5b, 0x4f, 0x66, 0x6d, 0x7d, 0
 */
 
 //Port 1, 7-segment display segment control
-    #define A_CTRL  BIT0    //Segment A
-    #define B_CTRL  BIT1    //Segment B
-    #define C_CTRL  BIT2    //Segment C
-    #define D_CTRL  BIT3    //Segment D
-    #define E_CTRL  BIT4    //Segment E
-    #define F_CTRL  BIT5    //Segment F
-    #define G_CTRL  BIT6    //Segment G
-    #define DP_CTRL BIT7    //Segment DP
+    #define A_CTRL  BIT0    
+    #define B_CTRL  BIT1    
+    #define C_CTRL  BIT2    
+    #define D_CTRL  BIT3    
+    #define E_CTRL  BIT4    
+    #define F_CTRL  BIT5    
+    #define G_CTRL  BIT6    
+    #define DP_CTRL BIT7    
 
 //Port 3, 7-segment display anode(digit) control
     #define A1_CTRL BIT0    // Digit 1
@@ -52,16 +52,14 @@ typedef enum
 volatile static DisplayState dispState = dispInit;      //Variable called 'dispState' of type 'DisplayState' used for changing digits on 7SD. dispInit sets UpdateDisplay() to default
 volatile unsigned int uiTimerTick = 0;                  //Timer counter
 
-#define D2      (0x08)
-
 #define externClkFreq (32768)
 int prescl = 1;         //Default prescaler 1
 
 //Variables for easily setting a digit's character from ucCharToHex[]
-volatile static int digit1Val = 14;
-volatile static int digit2Val = 17;
-volatile static int digit3Val = 18;
-volatile static int digit4Val = 19;
+volatile static int digit1Val = 14; // 'r'
+volatile static int digit2Val = 17; // 'E'
+volatile static int digit3Val = 18; // 'd'
+volatile static int digit4Val = 19; // 'y'
 
 float inputFreq = 0.5;
 float inputDC = 50;
@@ -96,7 +94,6 @@ float inputDC = 50;
         uiTimerTick++;                      // Every interrupt increment counter, used for how long an individual digit should be on/off
     }
 
-
 unsigned int periodCalc(float freq, unsigned int clkFreq, unsigned int prescaler)     // Converts inputed frequency into TA0CCR0
 {
     float periodInSec = 1.0 / freq;                                                   // Calculate the period in seconds
@@ -110,18 +107,16 @@ unsigned int dcCalc(float dc, unsigned int period)                              
     return dcPercent;
 }
 
-
     void pwm(void)
     {
         //P3 Configuration
-            P3DIR = D2;  //Set all 8 low side port pins to outputs The other segments will be off.
-            P3OUT = D2;    //Allows LED D2 to turn on
+            P3DIR = BIT3;  //Set all 8 low side port pins to outputs The other segments will be off.
+            P3OUT = BIT3;    //Allows LED D2 to turn on
 
         //P1 Configuration
             P1DIR = A3_CTRL;     //Init all of the Ax_CTRL pins to inputs except A3_CTRL for D2 LED
             P1OUT = 0;            //Init them all off before the main loop, keeps segments from fading in and out.
             P1SEL = BIT2;        //Select P1.2 as timer output instead of GPIO
-
 
             unsigned int period = periodCalc(inputFreq, externClkFreq, prescl);
             unsigned int dutyCycle = dcCalc(inputDC, period);
@@ -129,8 +124,6 @@ unsigned int dcCalc(float dc, unsigned int period)                              
         //Assign timer registers
             TA0CCR0 = (period);
             TA0CCR1 = (dutyCycle);
-
-
     }
 
     void updateDisplay(void)
@@ -141,7 +134,6 @@ unsigned int dcCalc(float dc, unsigned int period)                              
             case dispInit:  //Default setup state
             default:
             {
-
                 P1OUT &= ~(A1_CTRL | A2_CTRL | A3_CTRL | A4_CTRL | A5_CTRL);
                 P3OUT &= ~(A_CTRL | B_CTRL | C_CTRL | D_CTRL | E_CTRL | F_CTRL | G_CTRL | DP_CTRL);
                 uiLastTick = uiTimerTick;
@@ -184,7 +176,8 @@ unsigned int dcCalc(float dc, unsigned int period)                              
             break;
             case dispDigit3:
             {
-
+// Not sure if I can use this part for pwm because it would then be restricted by the
+// display timer(TimerA1) which would make the pwm signal inaccurate
 //                if ((uiTimerTick - uiLastTick) >= 1)
 //                    {
 
@@ -228,8 +221,6 @@ unsigned int dcCalc(float dc, unsigned int period)                              
         }
     }
 
-
-
 int main(void)
 {
     WDTCTL = WDTPW | WDTHOLD;
@@ -237,10 +228,8 @@ int main(void)
     setupTimerA1();
     pwm();
 
-
     while(1)
     {
         updateDisplay();
-
     }
 }
