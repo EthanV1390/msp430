@@ -63,6 +63,8 @@ volatile static int digit2Val = 17;
 volatile static int digit3Val = 18;
 volatile static int digit4Val = 19;
 
+float inputFreq = 0.5;
+float inputDC = 50;
 
 //Timer Setup functions
     //Timer A0
@@ -94,8 +96,6 @@ volatile static int digit4Val = 19;
         uiTimerTick++;                      // Every interrupt increment counter, used for how long an individual digit should be on/off
     }
 
-float inputFreq = 0.5;
-float inputDC = 90;
 
 unsigned int periodCalc(float freq, unsigned int clkFreq, unsigned int prescaler)     // Converts inputed frequency into TA0CCR0
 {
@@ -232,8 +232,8 @@ unsigned int dcCalc(float dc, unsigned int period)                              
 
 int main(void)
 {
-	WDTCTL = WDTPW | WDTHOLD;
-	setupTimerA0();
+    WDTCTL = WDTPW | WDTHOLD;
+    setupTimerA0();
     setupTimerA1();
     pwm();
 
@@ -244,13 +244,3 @@ int main(void)
 
     }
 }
-
-
-
-
-
-
-
-
-
-
