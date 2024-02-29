@@ -1,22 +1,24 @@
-//Ethan Van Deusen
-//Uses a PWM signal to flash LED D2
+/*
+    Ethan Van Deusen
+    Reference code that generates a PWM signal correctly
+    Uses a timer based PWM signal to flash LED D2
 
-/*Configuration:
-      Using External 32.768kHz watch crystal
-      Clock source: ACLK
+    Configuration:
       Timer: Timer0_A3
+      Timer source: ACLK
+      Clock source External 32.768kHz watch crystal
 */
 
 #include <msp430.h>
 
 #define externClkFreq (32768)
-#define prescl        (8)
+int prescl = 1;
 
 #define D2      (0x08)  //00001000, all off except for the D segment for D2 LED
 #define A3_CTRL (0x04)  //00000100, all inputs
 
 // Represents user inputs for frequency and duty cycle, will be replaced later with actual inputs
-float inputFreq = 1;
+float inputFreq = 0.5;
 float inputDC = 50;
 
 // Function to convert an inputed frequency into period
@@ -28,19 +30,30 @@ unsigned int periodCalc(float freq, unsigned int clkFreq, unsigned int prescaler
 }
 
 // Function to convert an inputed duty cycle percentage into the value for timer register
-unsigned int dcCalc(float dc, unsigned int period)
+unsigned int dcCalc(float dc, unsigned int period)    //Duty cycle percentage = period/TA0CCR1
 {
-    //Duty cycle percentage = period/TA0CCR1
     float dcPercent;
     dcPercent = period * (1-(dc/100));
     return dcPercent;
 }
-
+//Timer setup function, links timer to ACLK and configures it for PWM
 void setupTimerA0(void)
 {
-   TA0CCTL1 = OUTMOD_3;                //Set timer's output mode to set/reset
-   TA0CTL = TASSEL_1 + MC_1 + TACLR + ID_3;   //Select ACLK, Up mode, Clear timer count, Prescaler of 8
-   BCSCTL3 = XCAP_3;                   //Set capacitor to 12.5pF for crystal
+   TA0CCTL1 = OUTMOD_3;                       //Set timer's output mode to set/reset
+   TA0CTL = TASSEL_1 + MC_1 + TACLR + ID_0;   //Select ACLK, Up mode, Clear timer count, Prescaler of 8
+   BCSCTL3 = XCAP_3;                          //Set capacitor to 12.5pF for crystal
+   /***********************************************************************************
+    Allows prescaler to be dynamic to adapt to the correct frequency input, to go all the way down to 0.1 the prescaler needs to be set to 8.
+    This is because the register must be set to a number larger then a 16 bit register can hold, so dividing it by 8 lets it fit. The problem with that
+    is the larger values for frequency won't be properly represented (Values larger then 4096 don't work at all). To solve all of this the prescaler will be dynamic
+    most of the time the prescaler will be set to 1 but if the frequency is less then 1 it will be set to 8. This allows the full range 0.1-9,999 to be represented.
+    ***********************************************************************************/
+   if (inputFreq < 1)
+   {
+       prescl = 8;      // Sets calculation prescaler to 8
+       TA0CTL &= ~ID_3; // Clear the ID bits
+       TA0CTL |= ID_3;  // Set the timers prescaler to 8
+   }
 }
 
 int main(void)
@@ -67,13 +80,6 @@ int main(void)
    // __bis_SR_register(LPM3_bits);      //Enter LPM3
     return 0;
 }
-
-
-
-
-
-
-
 
 
 
