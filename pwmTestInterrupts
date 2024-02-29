@@ -1,0 +1,108 @@
+/*
+    Ethan Van Deusen
+    Reference code that generates a PWM signal correctly
+    Uses a timer interrupt based PWM signal to flash LED D2
+
+    Configuration:
+      Timer: Timer0_A3
+      Timer source: ACLK
+      Clock source External 32.768kHz watch crystal
+*/
+
+#include <msp430.h>
+
+#define externClkFreq (32768)
+int prescl = 1;
+
+#define D2      (BIT3)  //00001000, all off except for the D segment for D2 LED
+#define A3_CTRL (BIT2)  //00000100, all inputs
+
+// Represents user inputs for frequency and duty cycle, will be replaced later with actual inputs
+float inputFreq = 1;
+float inputDC = 50;
+
+// Function to convert an inputed frequency into period
+unsigned int periodCalc(float freq, unsigned int clkFreq, unsigned int prescaler)
+{
+    float periodInSec = 1.0 / freq;  // Calculate the period in seconds
+    unsigned int periodInCycles = (unsigned int)(periodInSec * clkFreq / prescaler);  // Convert to clock cycles
+    return periodInCycles;
+}
+
+// Function to convert an inputed duty cycle percentage into the value for timer register
+unsigned int dcCalc(float dc, unsigned int period)    //Duty cycle percentage = period/TA0CCR1
+{
+    float dcPercent;
+    dcPercent = period * (1-(dc/100));
+    return dcPercent;
+}
+
+//Timer setup function, links timer to ACLK and configures it for PWM
+void setupTimerA0(void)
+{
+   TA0CCTL0 = OUTMOD_7;                       //Set timer's output mode to set/reset
+   TA0CTL = TASSEL_1 + MC_1 + TACLR + ID_0;   //Select ACLK, Up mode, Clear timer count, Prescaler of 8
+   BCSCTL3 = XCAP_3;                          //Set capacitor to 12.5pF for crystal
+
+   TA0CCTL0 = CCIE;                           // Enable TimerA0 CCR0 interrupt
+   TA0CCTL1 = CCIE;                           // Enable TimerA0 CCR1 interrupt
+   __bis_SR_register(GIE);                    // Enable global interrupts
+
+   /***********************************************************************************
+    Allows prescaler to be dynamic to adapt to the correct frequency input, to go all the way down to 0.1 the prescaler needs to be set to 8.
+    This is because the register must be set to a number larger then a 16 bit register can hold, so dividing it by 8 lets it fit. The problem with that
+    is the larger values for frequency won't be properly represented (Values larger then 4096 don't work at all). To solve all of this the prescaler will be dynamic
+    most of the time the prescaler will be set to 1 but if the frequency is less then 1 it will be set to 8. This allows the full range 0.1-9,999 to be represented.
+    ***********************************************************************************/
+   if (inputFreq < 1)
+   {
+       prescl = 8;      // Sets calculation prescaler to 8
+       TA0CTL &= ~ID_3; // Clear the ID bits
+       TA0CTL |= ID_3;  // Set the timers prescaler to 8
+   }
+}
+
+//Switched from outputting via 'P1SEL = BIT2;' to toggling the LED with timer interrupts at CCRO and CCR1       
+
+
+// TimerA0 CCR0 interrupt handler
+#pragma vector=TIMER0_A0_VECTOR
+__interrupt void Timer0_A0_ISR(void)
+{
+    switch (__even_in_range(TA0IV, 14)) {
+            case 0: break; // No interrupt
+            case 2: P3OUT = 0; // End PWM
+                    break;
+            // Handle other CCRx interrupts if needed
+            default: break;
+        }
+}
+// TimerA0 CCR1 interrupt handler
+#pragma vector=TIMER0_A1_VECTOR
+__interrupt void TIMER0_A1_ISR(void)
+{
+    P3OUT = D2;
+}
+
+
+int main(void)
+{
+    WDTCTL = WDTPW | WDTHOLD;
+    P3OUT = 0;                  //Makes sure the led starts off 
+
+    setupTimerA0();
+    unsigned int period = periodCalc(inputFreq, externClkFreq, prescl);
+    unsigned int dutyCycle = dcCalc(inputDC, period);
+
+//P3 Configuration
+    P3DIR = 0xFF;  //Set all 8 low side port pins to outputs The other segments will be off.
+
+//P1 Configuration
+    P1DIR |= A3_CTRL;     //Init all of the Ax_CTRL pins to inputs except A3_CTRL for D2 LED
+    P1OUT = A3_CTRL;            //Init them all off before the main loop, keeps segments from fading in and out.
+
+//Timer counts up from 0 to TA0CCR0. Once it hits TA0CCR1 the light is turned on. When it reaches TA0CCR0 light turns off and timer resets. Now done via interrupts
+    TA0CCR0 = (period);                //Set PWM period
+    TA0CCR1 = (dutyCycle);             //Set duty cycle.   Duty Cycle = 50%
+    return 0;
+}
