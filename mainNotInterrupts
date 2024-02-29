@@ -1,0 +1,200 @@
+/*
+    Ethan Van Deusen
+    Modifiable Timing Light
+    2-21-24
+    main.c
+
+*/
+#include <msp430.h>
+#include "main.h"
+#include "pwm.h"
+
+#define D2  BIT3
+
+#define externClkFreq (32768)
+int prescl = 1;         //Default prescaler 1
+
+//Variables for easily setting a digit's character from ucCharToHex[]
+volatile static int digit1Val = 14; // 'r'
+volatile static int digit2Val = 17; // 'E'
+volatile static int digit3Val = 18; // 'd'
+volatile static int digit4Val = 19; // 'y'
+
+
+
+//Timer Setup functions
+    //Timer A0
+    void setupTimerA0(void) //Timer0_A3 setup function
+    {
+       TA0CCTL1 = OUTMOD_3;                     //Set timer's output mode to set/reset
+       TA0CTL = TASSEL_1 + MC_1 + TACLR + ID_0; //Select ACLK, Up mode, Clear timer count, Prescaler of 1
+       BCSCTL3 = XCAP_3;                        //Set capacitor to 12.5pF for crystal
+
+       if (inputFreq < 1)   //Dynamic prescaler to represent full range
+       {
+           prescl = 8;      // Set calculation prescaler
+           TA0CTL |= ID_3;  // Set timers prescaler to 8
+       }
+    }
+    //TimerA1
+    void setupTimerA1(void)
+    {
+      TA1CTL = TACLR;                       // Stop the timer and clear it first
+      TA1CCR0 = 400;                        // Timer period register,   400 / 8MHZ = 50us
+      TA1CTL = TASSEL_2 + MC_1;             // SMCLK, count-up mode
+      TA1CCTL0 = CCIE;                      // Enable Timer1_A2 CCR0 interrupt
+      __bis_SR_register(GIE);
+    }
+    // TimerA1, TA1CCR0 Register Interrupt
+    #pragma vector=TIMER1_A0_VECTOR
+    __interrupt void Timer1_A0 (void)
+    {
+        uiTimerTick++;                      // Every interrupt increment counter, used for how long an individual digit should be on/off
+    }
+
+    void pwm(void)
+    {
+
+        //P3 Configuration
+            P3DIR = BIT3;  //Set all 8 low side port pins to outputs The other segments will be off.
+            P3OUT = BIT3;    //Allows LED D2 to turn on
+
+        //P1 Configuration
+            P1SEL = BIT2;        //Select P1.2 as timer output instead of GPIO
+
+            P1DIR = A3_CTRL;
+            P1OUT = A3_CTRL;
+
+
+            unsigned int period = periodCalc(inputFreq, externClkFreq, prescl);
+            unsigned int dutyCycle = dcCalc(inputDC, period);
+
+        //Assign timer registers
+            TA0CCR0 = (period);
+            TA0CCR1 = (dutyCycle);
+
+    }
+
+    void updateDisplay(void)
+    {
+        static unsigned int uiLastTick = 0; // Timer counter to compare against uiTimerTick for waiting
+        switch (dispState)
+        {
+            case dispInit:  //Default setup state
+            default:
+            {
+
+                P1OUT &= ~(A1_CTRL | A2_CTRL | A3_CTRL | A4_CTRL | A5_CTRL);
+                P3OUT &= ~(A_CTRL | B_CTRL | C_CTRL | D_CTRL | E_CTRL | F_CTRL | G_CTRL | DP_CTRL);
+                uiLastTick = uiTimerTick;
+
+                // Set P1 and P3 to output
+                P3DIR = 0xFF;
+                P1DIR = 0xFF;
+                dispState = dispDigit1;
+            }
+            break;
+            case dispDigit1:
+            {
+                if ((uiTimerTick - uiLastTick) >= 1)
+                    {
+                        P3OUT = ucCharToHex[digit1Val];            // Segment data
+                        P1OUT = A1_CTRL;         // Select first digit
+                    }
+                if ((uiTimerTick - uiLastTick) >= 8)
+                    {
+                        uiLastTick = uiTimerTick;
+                        dispState = dispDigit2;
+                        P1OUT &= ~A1_CTRL;       // Turn off anode 1
+
+                    }
+            }
+            break;
+            case dispDigit2:
+            {
+                if ((uiTimerTick - uiLastTick) >= 1)
+                    {
+                        P3OUT = ucCharToHex[digit2Val];            // Segment data
+                        P1OUT = A2_CTRL;         // Select second digit
+                    }
+                if ((uiTimerTick - uiLastTick) >= 8)
+                    {
+                        uiLastTick = uiTimerTick;
+                        dispState = dispDigit3;
+                        P1OUT &= ~A2_CTRL;       // Turn off anode 2
+
+                    }
+            }
+            break;
+            case dispDigit3:
+            {
+// Not sure if I can use this part for pwm because it would then be restricted by the
+// display timer(TimerA1) which would make the pwm signal inaccurate
+//                if ((uiTimerTick - uiLastTick) >= 1)
+//                    {
+
+//                    }
+//                if ((uiTimerTick - uiLastTick) >= 8)
+//                    {
+                  dispState = dispDigit4;
+//                    }
+            }
+            break;
+            case dispDigit4:
+            {
+                if ((uiTimerTick - uiLastTick) >= 1)
+                    {
+                        P3OUT = ucCharToHex[digit3Val];            // Segment data
+                        P1OUT = A4_CTRL;         // Select third digit
+                    }
+                if ((uiTimerTick - uiLastTick) >= 8)
+                    {
+                        uiLastTick = uiTimerTick;
+                        dispState = dispDigit5;
+                        P1OUT &= ~A4_CTRL;       // Turn off anode 4
+
+                    }
+            }
+            break;
+            case dispDigit5:
+            {
+                if ((uiTimerTick - uiLastTick) >= 1)
+                    {
+                        P3OUT = ucCharToHex[digit4Val];            // Segment data
+                        P1OUT = A5_CTRL;         // Select fifth digit
+                    }
+                if ((uiTimerTick - uiLastTick) >= 8)
+                    {
+                        uiLastTick = uiTimerTick;
+                        dispState = dispDigit1;
+                        P1OUT &= ~A5_CTRL;       // Turn off anode 5
+
+                    }
+            }
+            break;
+        }
+    }
+
+
+int main(void)
+{
+	WDTCTL = WDTPW | WDTHOLD;
+	setupTimerA0();
+    setupTimerA1();
+    pwm();
+
+    while(1)
+    {
+        updateDisplay();
+    }
+}
+
+
+
+
+
+
+
+
+
+
