@@ -18,7 +18,7 @@ int prescl = 1;
 #define A3_CTRL (BIT2)  //00000100, all inputs
 
 // Represents user inputs for frequency and duty cycle, will be replaced later with actual inputs
-float inputFreq = 1;
+float inputFreq = 0.5;
 float inputDC = 50;
 
 // Function to convert an inputed frequency into period
@@ -62,7 +62,7 @@ void setupTimerA0(void)
    }
 }
 
-//Switched from outputting via 'P1SEL = BIT2;' to toggling the LED with timer interrupts at CCRO and CCR1       
+//Switched from outputting via 'P1SEL = BIT2;' to toggling the LED with timer interrupts at CCRO and CCR1
 
 
 // TimerA0 CCR0 interrupt handler
@@ -70,25 +70,29 @@ void setupTimerA0(void)
 __interrupt void Timer0_A0_ISR(void)
 {
     switch (__even_in_range(TA0IV, 14)) {
-            case 0: break; // No interrupt
-            case 2: P3OUT = 0; // End PWM
-                    break;
+            case 0:
+                break; // No interrupt
+            case 2:
+                P1OUT = 0; // End PWM
+
+                break;
             // Handle other CCRx interrupts if needed
-            default: break;
+            default:
+                break;
         }
 }
 // TimerA0 CCR1 interrupt handler
 #pragma vector=TIMER0_A1_VECTOR
 __interrupt void TIMER0_A1_ISR(void)
 {
-    P3OUT = D2;
+    P1OUT |= BIT7;
 }
 
 
 int main(void)
 {
     WDTCTL = WDTPW | WDTHOLD;
-    P3OUT = 0;                  //Makes sure the led starts off 
+    P1OUT = 0;                  //Makes sure the led starts off
 
     setupTimerA0();
     unsigned int period = periodCalc(inputFreq, externClkFreq, prescl);
@@ -96,13 +100,16 @@ int main(void)
 
 //P3 Configuration
     P3DIR = 0xFF;  //Set all 8 low side port pins to outputs The other segments will be off.
+    P1DIR = 0xFF;  //Set all 8 low side port pins to outputs The other segments will be off.
 
 //P1 Configuration
     P1DIR |= A3_CTRL;     //Init all of the Ax_CTRL pins to inputs except A3_CTRL for D2 LED
-    P1OUT = A3_CTRL;            //Init them all off before the main loop, keeps segments from fading in and out.
+    P1OUT |= A3_CTRL;            //Init them all off before the main loop, keeps segments from fading in and out.
 
 //Timer counts up from 0 to TA0CCR0. Once it hits TA0CCR1 the light is turned on. When it reaches TA0CCR0 light turns off and timer resets. Now done via interrupts
     TA0CCR0 = (period);                //Set PWM period
     TA0CCR1 = (dutyCycle);             //Set duty cycle.   Duty Cycle = 50%
     return 0;
 }
+
+
