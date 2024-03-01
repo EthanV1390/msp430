@@ -1,200 +1,127 @@
 /*
     Ethan Van Deusen
-    Modifiable Timing Light
-    2-21-24
-    main.c
+    Reference code that generates a PWM signal correctly
+    Sets P1.2 and P1.7 as timer outputs to generate a PWM signal. Flashes both D2 and D6 LED
 
+    Configuration:
+      Timer: Timer0_A3
+      Timer source: ACLK
+      Clock source External 32.768kHz watch crystal
 */
-#include <msp430.h>
-#include "main.h"
-#include "pwm.h"
 
-#define D2  BIT3
+#include <msp430.h>
 
 #define externClkFreq (32768)
-int prescl = 1;         //Default prescaler 1
+int prescl = 1;
 
-//Variables for easily setting a digit's character from ucCharToHex[]
-volatile static int digit1Val = 14; // 'r'
-volatile static int digit2Val = 17; // 'E'
-volatile static int digit3Val = 18; // 'd'
-volatile static int digit4Val = 19; // 'y'
+#define D2      (BIT3)
+#define A3_CTRL (BIT2)
 
+// Represents user inputs for frequency and duty cycle, will be replaced later with actual inputs
+float inputFreq = 0.5;
+float inputDC = 50;
 
+// Function to convert an inputed frequency into period
+unsigned int periodCalc(float freq, unsigned int clkFreq, unsigned int prescaler)
+{
+    float periodInSec = 1.0 / freq;  // Calculate the period in seconds
+    unsigned int periodInCycles = (unsigned int)(periodInSec * clkFreq / prescaler);  // Convert to clock cycles
+    return periodInCycles;
+}
 
-//Timer Setup functions
-    //Timer A0
-    void setupTimerA0(void) //Timer0_A3 setup function
-    {
-       TA0CCTL1 = OUTMOD_3;                     //Set timer's output mode to set/reset
-       TA0CTL = TASSEL_1 + MC_1 + TACLR + ID_0; //Select ACLK, Up mode, Clear timer count, Prescaler of 1
-       BCSCTL3 = XCAP_3;                        //Set capacitor to 12.5pF for crystal
-
-       if (inputFreq < 1)   //Dynamic prescaler to represent full range
-       {
-           prescl = 8;      // Set calculation prescaler
-           TA0CTL |= ID_3;  // Set timers prescaler to 8
-       }
-    }
-    //TimerA1
-    void setupTimerA1(void)
-    {
-      TA1CTL = TACLR;                       // Stop the timer and clear it first
-      TA1CCR0 = 400;                        // Timer period register,   400 / 8MHZ = 50us
-      TA1CTL = TASSEL_2 + MC_1;             // SMCLK, count-up mode
-      TA1CCTL0 = CCIE;                      // Enable Timer1_A2 CCR0 interrupt
-      __bis_SR_register(GIE);
-    }
-    // TimerA1, TA1CCR0 Register Interrupt
-    #pragma vector=TIMER1_A0_VECTOR
-    __interrupt void Timer1_A0 (void)
-    {
-        uiTimerTick++;                      // Every interrupt increment counter, used for how long an individual digit should be on/off
-    }
-
-    void pwm(void)
-    {
-
-        //P3 Configuration
-            P3DIR = BIT3;  //Set all 8 low side port pins to outputs The other segments will be off.
-            P3OUT = BIT3;    //Allows LED D2 to turn on
-
-        //P1 Configuration
-            P1SEL = BIT2;        //Select P1.2 as timer output instead of GPIO
-
-            P1DIR = A3_CTRL;
-            P1OUT = A3_CTRL;
-
-
-            unsigned int period = periodCalc(inputFreq, externClkFreq, prescl);
-            unsigned int dutyCycle = dcCalc(inputDC, period);
-
-        //Assign timer registers
-            TA0CCR0 = (period);
-            TA0CCR1 = (dutyCycle);
-
-    }
-
-    void updateDisplay(void)
-    {
-        static unsigned int uiLastTick = 0; // Timer counter to compare against uiTimerTick for waiting
-        switch (dispState)
-        {
-            case dispInit:  //Default setup state
-            default:
-            {
-
-                P1OUT &= ~(A1_CTRL | A2_CTRL | A3_CTRL | A4_CTRL | A5_CTRL);
-                P3OUT &= ~(A_CTRL | B_CTRL | C_CTRL | D_CTRL | E_CTRL | F_CTRL | G_CTRL | DP_CTRL);
-                uiLastTick = uiTimerTick;
-
-                // Set P1 and P3 to output
-                P3DIR = 0xFF;
-                P1DIR = 0xFF;
-                dispState = dispDigit1;
-            }
-            break;
-            case dispDigit1:
-            {
-                if ((uiTimerTick - uiLastTick) >= 1)
-                    {
-                        P3OUT = ucCharToHex[digit1Val];            // Segment data
-                        P1OUT = A1_CTRL;         // Select first digit
-                    }
-                if ((uiTimerTick - uiLastTick) >= 8)
-                    {
-                        uiLastTick = uiTimerTick;
-                        dispState = dispDigit2;
-                        P1OUT &= ~A1_CTRL;       // Turn off anode 1
-
-                    }
-            }
-            break;
-            case dispDigit2:
-            {
-                if ((uiTimerTick - uiLastTick) >= 1)
-                    {
-                        P3OUT = ucCharToHex[digit2Val];            // Segment data
-                        P1OUT = A2_CTRL;         // Select second digit
-                    }
-                if ((uiTimerTick - uiLastTick) >= 8)
-                    {
-                        uiLastTick = uiTimerTick;
-                        dispState = dispDigit3;
-                        P1OUT &= ~A2_CTRL;       // Turn off anode 2
-
-                    }
-            }
-            break;
-            case dispDigit3:
-            {
-// Not sure if I can use this part for pwm because it would then be restricted by the
-// display timer(TimerA1) which would make the pwm signal inaccurate
-//                if ((uiTimerTick - uiLastTick) >= 1)
-//                    {
-
-//                    }
-//                if ((uiTimerTick - uiLastTick) >= 8)
-//                    {
-                  dispState = dispDigit4;
-//                    }
-            }
-            break;
-            case dispDigit4:
-            {
-                if ((uiTimerTick - uiLastTick) >= 1)
-                    {
-                        P3OUT = ucCharToHex[digit3Val];            // Segment data
-                        P1OUT = A4_CTRL;         // Select third digit
-                    }
-                if ((uiTimerTick - uiLastTick) >= 8)
-                    {
-                        uiLastTick = uiTimerTick;
-                        dispState = dispDigit5;
-                        P1OUT &= ~A4_CTRL;       // Turn off anode 4
-
-                    }
-            }
-            break;
-            case dispDigit5:
-            {
-                if ((uiTimerTick - uiLastTick) >= 1)
-                    {
-                        P3OUT = ucCharToHex[digit4Val];            // Segment data
-                        P1OUT = A5_CTRL;         // Select fifth digit
-                    }
-                if ((uiTimerTick - uiLastTick) >= 8)
-                    {
-                        uiLastTick = uiTimerTick;
-                        dispState = dispDigit1;
-                        P1OUT &= ~A5_CTRL;       // Turn off anode 5
-
-                    }
-            }
-            break;
-        }
-    }
-
+// Function to convert an inputed duty cycle percentage into the value for timer register
+unsigned int dcCalc(float dc, unsigned int period)    //Duty cycle percentage = period/TA0CCR1
+{
+    float dcPercent;
+    dcPercent = period * (1-(dc/100));
+    return dcPercent;
+}
+//Timer setup function, links timer to ACLK and configures it for PWM
+void setupTimerA0(void)
+{
+   TA0CCTL1 = OUTMOD_3;                       //Set timer's output mode to set/reset. Register for D2 (P1.2)
+   TA0CCTL2 = OUTMOD_3;                       //Set timer's output mode to set/reset  Register for D6 (P1.7)
+   TA0CTL = TASSEL_1 + MC_1 + TACLR + ID_0;   //Select ACLK, Up mode, Clear timer count, Prescaler of 8
+   BCSCTL3 = XCAP_3;                          //Set capacitor to 12.5pF for crystal
+   /***********************************************************************************
+    Allows prescaler to be dynamic to adapt to the correct frequency input, to go all the way down to 0.1 the prescaler needs to be set to 8.
+    This is because the register must be set to a number larger then a 16 bit register can hold, so dividing it by 8 lets it fit. The problem with that
+    is the larger values for frequency won't be properly represented (Values larger then 4096 don't work at all). To solve all of this the prescaler will be dynamic
+    most of the time the prescaler will be set to 1 but if the frequency is less then 1 it will be set to 8. This allows the full range 0.1-9,999 to be represented.
+    ***********************************************************************************/
+   if (inputFreq < 1)
+   {
+       prescl = 8;      // Sets calculation prescaler to 8
+       TA0CTL &= ~ID_3; // Clear the ID bits
+       TA0CTL |= ID_3;  // Set the timers prescaler to 8
+   }
+}
 
 int main(void)
 {
-	WDTCTL = WDTPW | WDTHOLD;
-	setupTimerA0();
-    setupTimerA1();
-    pwm();
+    WDTCTL = WDTPW | WDTHOLD;
 
-    while(1)
-    {
-        updateDisplay();
-    }
+    setupTimerA0();
+    unsigned int period = periodCalc(inputFreq, externClkFreq, prescl);
+    unsigned int dutyCycle = dcCalc(inputDC, period);
+
+//P3 Configuration
+    P3DIR = 0xFF;  //Set all 8 low side port pins to outputs The other segments will be off.
+    P3OUT = D2;    //Allows LED D2 to turn on
+
+//P1 Configuration
+    P1DIR |= (BIT2 | BIT7);     //Init all of the Ax_CTRL pins to inputs except A3_CTRL for D2 LED
+    P1SEL |= (BIT2 | BIT7);     //Select P1.2 as timer output instead of GPIO
+
+//Set up Timer0_A3
+//Timer counts up from 0 to TA0CCR0. Once it hits TA0CCR1 the light is turned on. When it reaches TA0CCR0 light turns off and timer resets.
+    TA0CCR0 = (period);                //Set PWM period
+    TA0CCR1 = (dutyCycle);             //Set duty cycle,  Register for D2 (P1.2)
+    TA0CCR2 = (dutyCycle);             //Set duty cycle,  Register for D6 (P1.7)
+    return 0;
 }
 
+/*
+Testing values of different frequency to make sure the desired range is actually working
+This was before I implemented the dynamic prescaler, full range seems to work now.
 
+No prescaler max value in register = 65,535
+(65,535 * 2) = 131,070
+(65,535 * 4) = 262,140
+(65,535 * 8) = 524,280
+Max value needed for 0.1 = 327,680
 
+Prescaler 8:
+0.1 = 40,960; 20,480 5 sec      327,680 +++
+1   = 4,096;  2,048 0.5sec      32,768  +++
+60  = 68;     34                544     +++
+100 = 40;     20                320     +++
+400 = 10;     5                 80      +++
+1000 = 4;     2                 32      +++
+4096 = 1;     0                 8       +++
+4097 = 0;     0                 8       ---
 
+Prescaler 4:
+0.1 = 65,535; 32,767 4 sec      262,140 ---
+1   = 8,192;  4,096 0.5sec      32,768  +++
+60  = 136;    68                544     +++
+100 =  81;    40                324     +++
+4096 =  2;    1                 8       +++
+5000 =  1;    0                 4       ---
+8192 =  1;    0                 4       ---
 
+Prescaler 2:
+0.1 = 65,535; 32,767 2 sec      131,070 ---
+1   = 16,384; 8,192  0.5sec     32,768  +++
+60  = 273;    136               546     +++
+100 = 163;    81                326     +++
+9999 =  1;    0
 
-
-
-
+Prescaler 1:
+0.1 = 65,535; 32,767 1 sec      65,535 ---
+1   = 32,768; 16,384 0.5sec     32,768 +++
+60  = 546;    273               546    +++
+100 = 327;    163               327    +++
+9999 =  3;    1
+*/
 
