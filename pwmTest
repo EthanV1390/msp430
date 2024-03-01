@@ -18,22 +18,21 @@ int prescl = 1;
 #define A3_CTRL (BIT2)
 
 // Represents user inputs for frequency and duty cycle, will be replaced later with actual inputs
-float inputFreq = 0.5;  
+float inputFreq = 0.5;
 float inputDC = 50;
 
 // Function to convert an inputed frequency into period
-unsigned int periodCalc(float freq, unsigned int clkFreq, unsigned int prescaler)
+unsigned int periodCalc(float freq, unsigned int clkFreq, unsigned int prescaler)     // Converts inputed frequency into TA0CCR0
 {
-    float periodInSec = 1.0 / freq;  // Calculate the period in seconds
-    unsigned int periodInCycles = (unsigned int)(periodInSec * clkFreq / prescaler);  // Convert to clock cycles
+    float periodInSec = 1.0 / freq;                                                   // Calculate the period in seconds
+    unsigned int periodInCycles = (unsigned int)((clkFreq/prescaler) * periodInSec);  // Convert to clock cycles
     return periodInCycles;
 }
 
 // Function to convert an inputed duty cycle percentage into the value for timer register
-unsigned int dcCalc(float dc, unsigned int period)    //Duty cycle percentage = period/TA0CCR1
+unsigned int dcCalc(float dc, unsigned int period)                                    // Converts inputed duty cycle into TA0CCR1
 {
-    float dcPercent;
-    dcPercent = period * (1-(dc/100));
+    float dcPercent = (unsigned int)(period * (1-(dc/100)));
     return dcPercent;
 }
 //Timer setup function, links timer to ACLK and configures it for PWM
@@ -57,28 +56,37 @@ void setupTimerA0(void)
    }
 }
 
+void pwm(void)
+{
+    if (inputFreq < 1)                   // Dynamic prescaler to represent full range
+    {
+        prescl = 8;                      // Set calculation prescaler
+        TA0CTL |= ID_3;                  // Set timers prescaler to 8
+    }
+
+    unsigned int period = periodCalc(inputFreq, externClkFreq, prescl);
+    unsigned int dutyCycle = dcCalc(inputDC, period);
+
+    //P1 Configuration
+    P1DIR |= (BIT2 | BIT7);     //Init all of the Ax_CTRL pins to inputs except A3_CTRL for D2 LED
+    P1SEL |= (BIT2 | BIT7);     //Select P1.2 as timer output instead of GPIO
+
+    //P3 Configuration
+    P3DIR = 0xFF;  //Set all 8 low side port pins to outputs The other segments will be off.
+    P3OUT = D2;    //Allows LED D2 to turn on
+
+    //Assign timer registers
+    TA0CCR0 = (period);
+    TA0CCR1 = (dutyCycle);             //Set duty cycle,  Register for D2 (P1.2)
+    TA0CCR2 = (dutyCycle);
+}
+
 int main(void)
 {
     WDTCTL = WDTPW | WDTHOLD;
 
     setupTimerA0();
-    unsigned int period = periodCalc(inputFreq, externClkFreq, prescl);
-    unsigned int dutyCycle = dcCalc(inputDC, period);
-
-//P3 Configuration
-    P3DIR = 0xFF;  //Set all 8 low side port pins to outputs The other segments will be off.
-    P3OUT = D2;    //Allows LED D2 to turn on
-
-//P1 Configuration
-    P1DIR |= (BIT2 | BIT7);     //Init all of the Ax_CTRL pins to inputs except A3_CTRL for D2 LED
-    P1SEL |= (BIT2 | BIT7);     //Select P1.2 as timer output instead of GPIO
-
-//Set up Timer0_A3
-//Timer counts up from 0 to TA0CCR0. Once it hits TA0CCR1 the light is turned on. When it reaches TA0CCR0 light turns off and timer resets.
-    TA0CCR0 = (period);                //Set PWM period
-    TA0CCR1 = (dutyCycle);             //Set duty cycle,  Register for D2 (P1.2)
-    TA0CCR2 = (dutyCycle);             //Set duty cycle,  Register for D6 (P1.7)  
-    return 0;
+    pwm();
 }
 
 /*
