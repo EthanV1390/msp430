@@ -6,7 +6,6 @@
 //Currently the D2 LED is setup as a debug LED that should toggle whenever the button state changes
 //Based on D2's behavior it does not seem like the mistoggling issue is hardware related but rather something to do with debouncing code
 
-
 #include <msp430.h>
 
 #define DEBUG BIT2
@@ -14,6 +13,7 @@
 #define BUTTON BIT1
 #define LED BIT7
 volatile unsigned int uiTimerTick = 0;                  //Timer counter
+unsigned char prevState;
 
 // The board uses Pull Down resistors for the buttons, When buttons are NOT pressed the resistor 'pulls down' the pin to 0.
 // When button is pressed the pin is connected to voltage which results in the pin being set to 1
@@ -38,6 +38,25 @@ __interrupt void Timer1_A0 (void)
     uiTimerTick++;  // Interrupt counter, each 'tick'/increment represents 50us
 }
 
+void debounce()
+{
+    static unsigned int uiLastTick = 0; // Timer counter to compare against uiTimerTick for waiting
+    unsigned char currState = (P2IN & BUTTON);      // Current state of button
+    if(currState != prevState)                      // If the button state has changed
+    {
+       P1OUT ^= DEBUG;                              // Debugging, led flash when state changes
+       if(currState == BUTTON)                      // If button is pressed
+       {
+           if ((uiTimerTick - uiLastTick) >= 200)   // 200 ticks of 50us = 10ms debounce time
+           {
+               P1OUT ^= LED;                        // Toggle LED
+               uiLastTick = uiTimerTick;
+           }
+       }
+       prevState = currState;
+    }
+}
+
 void main(void)
 {
     /*Debugging, Uses D2 to track the button changing states */
@@ -49,32 +68,16 @@ void main(void)
 
     WDTCTL = WDTPW + WDTHOLD;
     setupTimerA1();
-    static unsigned int uiLastTick = 0; // Timer counter to compare against uiTimerTick for waiting
-
     P1DIR |= LED;                               // Set LED pin as an output
     P1OUT &= ~LED;                              // Initial state off
-    P2DIR &= ~BUTTON;                           // Set BUTTON pin as an input
-    unsigned char prevState = (P2IN & BUTTON);  // State the button was just in
 
+    P2DIR &= ~BUTTON;                           // Set BUTTON pin as an input
+    prevState = (P2IN & BUTTON);  // State the button was just in
     while(1)
     {
-        unsigned char currState = (P2IN & BUTTON);      // Current state of button
-        if(currState != prevState)                      // If the button state has changed
-        {
-           P1OUT ^= DEBUG;                              // Debugging, led flash when state changes
-           if(currState == BUTTON)                      // If button is pressed
-           {
-               if ((uiTimerTick - uiLastTick) >= 200)   // 200 ticks of 50us = 10ms debounce time
-               {
-                   P1OUT ^= LED;                        // Toggle LED
-                   uiLastTick = uiTimerTick;
-               }
-           }
-           prevState = currState;
-        }
+        debounce();
     }
 }
-
 
 /*  Toggling done with interrupts, no debouncing
     #include <msp430.h>
@@ -97,7 +100,6 @@ void main(void)
         P2IES &= ~BUTTON; // P2.1 interrupt is triggered on the low to high transition
         P2IFG &= ~BUTTON; // P2.1 IFG cleared
         __bis_SR_register(GIE);
-
     }
 
     // Port 2 interrupt service routine
@@ -108,112 +110,6 @@ void main(void)
      P2IFG &= ~BUTTON; // P2.1 IFG cleared
     }
 */
-
-
-
-
-
-
-/*  Toggling done without interrupts, no debouncing
-#include <msp430.h>
-
-#define BUTTON BIT1
-#define LED BIT7
-#define DEBOUNCE_TIME 1000 // Adjust as needed
-
-void main(void)
-{
-    WDTCTL = WDTPW + WDTHOLD; // Stop watchdog timer
-
-    P1DIR |= LED; // Set LED pin as an output
-    P2DIR &= ~BUTTON; // Set BUTTON pin as an input
-
-    while(1) // Infinite loop
-    {
-        if((P2IN & BUTTON) == BUTTON) // If button is pressed
-        {
-            P1OUT ^= LED; // Toggle LED
-
-            // Debounce delay
-            __delay_cycles(DEBOUNCE_TIME);
-
-            // Wait for button release
-            while((P2IN & BUTTON) == BUTTON);
-        }
-    }
-}
-
-*/
-
-
-
-
-/* Work in progress
-#include <msp430.h>
-
-#define BUTTON BIT1
-#define LED BIT7
-volatile unsigned int uiTimerTick = 0;                  //Timer counter
-
-// The board uses Pull Down resistors for the buttons, When buttons are NOT pressed the resistor 'pulls down' the pin to 0.
-// When button is pressed the pin is connected to voltage which results in the pin being set to 1
-
-// Timer A1, Used for Display
-void setupTimerA1(void)
-{
-    // Configure DCO to 8 MHz
-    BCSCTL1 |= CALBC1_8MHZ;
-    DCOCTL |= CALDCO_8MHZ;
-
-    TA1CCR0 = 400;                       // Timer period register,   400 / 8MHZ = 50us
-    TA1CTL |= (TASSEL_2 + TACLR + MC_1); // SMCLK, count-up mode
-    TA1CCTL0 |= CCIE;                    // Enable Timer1_A2 CCR0 interrupt
-    __bis_SR_register(GIE);
-}
-
-// TA1CCR0 Register Interrupt
-#pragma vector=TIMER1_A0_VECTOR
-__interrupt void Timer1_A0 (void)
-{
-    uiTimerTick++;  // Every interrupt increment counter, used for how long an individual digit should be on/off. Each 'tick'/increment represents 50us
-}
-
-
-
-void main(void)
-{
-    WDTCTL = WDTPW + WDTHOLD;
-    setupTimerA1();
-    static unsigned int uiLastTick = 0; // Timer counter to compare against uiTimerTick for waiting
-
-    P1DIR |= LED; // Set LED pin as an output
-    P2DIR &= ~BUTTON; // Set BUTTON pin as an input
-
-    while(1)
-    {
-        if((P2IN & BUTTON) == BUTTON) // If button is pressed
-        {
-            if ((uiTimerTick - uiLastTick) >= 100)
-            {
-                P1OUT ^= LED; // Toggle LED
-                uiLastTick = uiTimerTick;
-            }
-        }
-    }
-}
-*/
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
