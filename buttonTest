@@ -1,26 +1,31 @@
 // Ethan Van Deusen
 // Button and debouncing test program
 
-// The code should toggle the D6 LED when the S2 button is pressed, a timer interrupt is used for debouncing
+// The code should toggle the D6 LED when the S2 button is pressed and D2 LED when it is held for 2 seconds
+// a timer interrupt is used for debouncing
 
 // The board uses Pull Down resistors for the buttons, When buttons are NOT pressed the resistor 'pulls down' the pin to 0.
 // When button is pressed the pin is connected to voltage which results in the pin being set to 1
 
 #include <msp430.h>
 
-#define DEBUG BIT2
+#define D2 BIT2
 #define TOGGLE_BUTTON BIT1
-#define LED BIT7
+#define APPLY_BUTTON BIT5 //Unused, for future use with multiple buttons 
+#define D6 BIT7
 
 #define HELD_TIME 40000                 // 2 Sec
 #define DEBOUNCE_TIME 1000              // 50 mS
 volatile unsigned int uiTimerTick = 0;  // Timer counter
+
+volatile unsigned int s2State = 0;
 
 typedef enum
 {
     idle,
     pressed,
     released,
+    held,
 } DebounceState;
 
 volatile static DebounceState debounceState = idle;      //Variable called 'debounceState' of type 'DebounceState' used for reading button presses
@@ -48,43 +53,61 @@ __interrupt void Timer1_A0 (void)
 void debounce()
 {
     static unsigned int uiLastTick = 0;
-    unsigned char currS2State = (P2IN & TOGGLE_BUTTON);
-
+    unsigned char currS2State = (P2IN & TOGGLE_BUTTON);     // Current state of S2 button, if pressed P2IN (00000010) will match TOGGLE_BUTTON indicating button is pressed
     switch(debounceState)
     {
         case (idle):
             if(currS2State == TOGGLE_BUTTON)
             {
-                debounceState = pressed;        // Transition to Pressed state
+                debounceState = pressed;
                 uiLastTick = uiTimerTick;
             }
             break;
         case (pressed):
             if(currS2State == TOGGLE_BUTTON)
             {
-                if ((uiTimerTick - uiLastTick) >= DEBOUNCE_TIME)
+                if ((uiTimerTick - uiLastTick) >= HELD_TIME)        // If the button is held for 2 seconds, toggle D2
                 {
-                    P1OUT ^= LED;               // Toggle LED
-                    debounceState = released;   // Transition to Released state
+                    s2State = 1;
+                    debounceState = held;
                 }
-//                Start of button held functionality, Should toggle blue LED after button is held for 2 seconds
-//                if ((uiTimerTick - uiLastTick) >= HELD_TIME)
-//                {
-//                    P1OUT ^= DEBUG;                              // Debugging, led flash when state changes
-//                    debounceState = released;   // Transition to Released state
-//                }
             }
-            else                                // If button has been released before debounce timer
+            else    // If button has been released
             {
-                debounceState = idle;           // Transition back to Idle state
+                if ((uiTimerTick - uiLastTick) >= DEBOUNCE_TIME)    // Regular press, so toggle D6
+                {
+                    s2State = 2;
+                    debounceState = released;
+                }
+                debounceState = idle;           // Transition back to Idle state if released BUT debounce timer not finished, this indicates a premature release
             }
             break;
         case (released):
-            if(currS2State != TOGGLE_BUTTON)
+            if(currS2State != TOGGLE_BUTTON)    // If button not pressed
             {
-                debounceState = idle;           // Transition back to Idle state
+                debounceState = idle;
             }
             break;
+        case (held):
+            if(currS2State != TOGGLE_BUTTON)
+            {
+                debounceState = idle;
+            }
+            break;
+    }
+}
+
+void processSwitches()
+{
+    if (s2State == 1)   //Held
+    {
+        P1OUT ^= D2;
+        s2State = 0;
+    }
+    else if (s2State == 2)  //Pressed
+    {
+        P1OUT ^= D6;
+        s2State = 0;
     }
 }
 
@@ -93,18 +116,19 @@ void main(void)
     /*Debugging, Sets up D2 for testing if needed */
     P3DIR |= BIT3;
     P3OUT |= BIT3;
-    P1DIR |= DEBUG;
-    P1OUT &= ~DEBUG;
+    P1DIR |= D2;
+    P1OUT &= ~D2;
     /**/
 
     WDTCTL = WDTPW + WDTHOLD;
     setupTimerA1();
-    P1DIR |= LED;
-    P1OUT &= ~LED;              // Initial state off
+    P1DIR |= D6;
+    P1OUT &= ~D6;              // Initial state off
     P2DIR &= ~TOGGLE_BUTTON;    // Set BUTTON pin as an input
     while(1)
     {
         debounce();
+        processSwitches();
     }
 }
 
