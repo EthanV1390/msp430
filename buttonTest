@@ -1,22 +1,29 @@
-//Ethan Van Deusen
-//Button and debouncing test program
+// Ethan Van Deusen
+// Button and debouncing test program
 
-//The code should toggle the D6 red LED when the S2 button is pressed, a timer interrupt is used for debouncing
+// The code should toggle the D6 LED when the S2 button is pressed, a timer interrupt is used for debouncing
 
-//Currently the D2 LED is setup as a debug LED that should toggle whenever the button state changes
-//Based on D2's behavior it does not seem like the mistoggling issue is hardware related but rather something to do with debouncing code
+// The board uses Pull Down resistors for the buttons, When buttons are NOT pressed the resistor 'pulls down' the pin to 0.
+// When button is pressed the pin is connected to voltage which results in the pin being set to 1
 
 #include <msp430.h>
 
 #define DEBUG BIT2
-
-#define BUTTON BIT1
+#define TOGGLE_BUTTON BIT1
 #define LED BIT7
-volatile unsigned int uiTimerTick = 0;                  //Timer counter
-unsigned char prevState;
 
-// The board uses Pull Down resistors for the buttons, When buttons are NOT pressed the resistor 'pulls down' the pin to 0.
-// When button is pressed the pin is connected to voltage which results in the pin being set to 1
+#define HELD_TIME 40000                 // 2 Sec
+#define DEBOUNCE_TIME 1000              // 50 mS
+volatile unsigned int uiTimerTick = 0;  // Timer counter
+
+typedef enum
+{
+    idle,
+    pressed,
+    released,
+} DebounceState;
+
+volatile static DebounceState debounceState = idle;      //Variable called 'debounceState' of type 'DebounceState' used for reading button presses
 
 // Timer A1
 void setupTimerA1(void)
@@ -40,26 +47,50 @@ __interrupt void Timer1_A0 (void)
 
 void debounce()
 {
-    static unsigned int uiLastTick = 0; // Timer counter to compare against uiTimerTick for waiting
-    unsigned char currState = (P2IN & BUTTON);      // Current state of button
-    if(currState != prevState)                      // If the button state has changed
+    static unsigned int uiLastTick = 0;
+    unsigned char currS2State = (P2IN & TOGGLE_BUTTON);
+
+    switch(debounceState)
     {
-       P1OUT ^= DEBUG;                              // Debugging, led flash when state changes
-       if(currState == BUTTON)                      // If button is pressed
-       {
-           if ((uiTimerTick - uiLastTick) >= 200)   // 200 ticks of 50us = 10ms debounce time
-           {
-               P1OUT ^= LED;                        // Toggle LED
-               uiLastTick = uiTimerTick;
-           }
-       }
-       prevState = currState;
+        case (idle):
+            if(currS2State == TOGGLE_BUTTON)
+            {
+                debounceState = pressed;        // Transition to Pressed state
+                uiLastTick = uiTimerTick;
+            }
+            break;
+        case (pressed):
+            if(currS2State == TOGGLE_BUTTON)
+            {
+                if ((uiTimerTick - uiLastTick) >= DEBOUNCE_TIME)
+                {
+                    P1OUT ^= LED;               // Toggle LED
+                    debounceState = released;   // Transition to Released state
+                }
+//                Start of button held functionality, Should toggle blue LED after button is held for 2 seconds
+//                if ((uiTimerTick - uiLastTick) >= HELD_TIME)
+//                {
+//                    P1OUT ^= DEBUG;                              // Debugging, led flash when state changes
+//                    debounceState = released;   // Transition to Released state
+//                }
+            }
+            else                                // If button has been released before debounce timer
+            {
+                debounceState = idle;           // Transition back to Idle state
+            }
+            break;
+        case (released):
+            if(currS2State != TOGGLE_BUTTON)
+            {
+                debounceState = idle;           // Transition back to Idle state
+            }
+            break;
     }
 }
 
 void main(void)
 {
-    /*Debugging, Uses D2 to track the button changing states */
+    /*Debugging, Sets up D2 for testing if needed */
     P3DIR |= BIT3;
     P3OUT |= BIT3;
     P1DIR |= DEBUG;
@@ -68,18 +99,16 @@ void main(void)
 
     WDTCTL = WDTPW + WDTHOLD;
     setupTimerA1();
-    P1DIR |= LED;                               // Set LED pin as an output
-    P1OUT &= ~LED;                              // Initial state off
-
-    P2DIR &= ~BUTTON;                           // Set BUTTON pin as an input
-    prevState = (P2IN & BUTTON);  // State the button was just in
+    P1DIR |= LED;
+    P1OUT &= ~LED;              // Initial state off
+    P2DIR &= ~TOGGLE_BUTTON;    // Set BUTTON pin as an input
     while(1)
     {
         debounce();
     }
 }
 
-/*  Toggling done with interrupts, no debouncing
+/*  Toggling done with interrupts, no debouncing    3/4/24
     #include <msp430.h>
 
     #define BUTTON BIT1
