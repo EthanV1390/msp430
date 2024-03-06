@@ -55,6 +55,161 @@ __interrupt void Timer1_A0 (void)
     uiTimerTick++;  // Interrupt counter, each 'tick'/increment represents 50us
 }
 
+void debounce(unsigned char button, volatile unsigned int *state, volatile DebounceState *debounceState)
+{
+    static unsigned int uiLastTick = 0;
+    unsigned char currState = (P2IN & button);    // Current state of button, if pressed P2IN will match the specific button pin indicating button is pressed
+
+    switch(*debounceState)
+    {
+        case (idle):
+            if(currState == button)
+            {
+                *debounceState = pressed;
+                uiLastTick = uiTimerTick;
+            }
+            break;
+        case (pressed):
+            if(currState == button)
+            {
+                if ((uiTimerTick - uiLastTick) >= HELD_TIME)        // If the button is held for 2 seconds, toggle D2
+                {
+                    *state = 1;
+                    *debounceState = held;
+                }
+            }
+            else    // If button has been released
+            {
+                if ((uiTimerTick - uiLastTick) >= DEBOUNCE_TIME)    // Regular press, so toggle D6
+                {
+                    *state = 2;
+                    *debounceState = released;
+                }
+                *debounceState = idle;           // Transition back to Idle state if released BUT debounce timer not finished, this indicates a premature release
+            }
+            break;
+        case (released):
+            if(currState != button)    // If button not pressed
+            {
+                *debounceState = idle;
+            }
+            break;
+        case (held):
+            if(currState != button)
+            {
+                *debounceState = idle;
+            }
+            break;
+    }
+
+}
+
+void processSwitches()
+{
+    //Toggle button
+    if (s2State == 1)   //Held
+    {
+        P1OUT ^= D2;
+        s2State = 0;
+    }
+    else if (s2State == 2)  //Pressed
+    {
+        P1OUT ^= D6;
+        s2State = 0;
+    }
+
+    //Apply Button
+    else if (s4State == 1)   //Held
+    {
+        //P1OUT ^= D2;
+        s4State = 0;
+    }
+    else if (s4State == 2)  //Pressed
+    {
+        P1OUT ^= D2;
+        s4State = 0;
+    }
+}
+
+void main(void)
+{
+    /*Debugging, Sets up D2 for testing if needed */
+    P3DIR |= BIT3;
+    P3OUT |= BIT3;
+    P1DIR |= D2;
+    P1OUT &= ~D2;
+    /**/
+
+    WDTCTL = WDTPW + WDTHOLD;
+    setupTimerA1();
+    P1DIR |= D6;
+    P1OUT &= ~D6;              // Initial state off
+    P2DIR &= ~TOGGLE_BUTTON;   // Set BUTTON pin as an input
+    P2DIR &= ~APPLY_BUTTON;    // Set BUTTON pin as an input
+    while(1)
+    {
+        debounce(TOGGLE_BUTTON, &s2State, &debounceStateToggle);
+        debounce(APPLY_BUTTON, &s4State, &debounceStateApply);
+        processSwitches();
+    }
+}
+
+/* Big debounce function, was switched out for individual parameter based debouncing function. Saved for reference
+
+// The code should toggle the D6 LED when the S2(Toggle) button is pressed and the D2 LED when the S4(Apply) button is pressed
+// a timer interrupt is used for debouncing
+
+//One big debouncing function for all buttons, no parameters 3/6/24
+
+// The board uses Pull Down resistors for the buttons, When buttons are NOT pressed the resistor 'pulls down' the pin to 0.
+// When button is pressed the pin is connected to voltage which results in the pin being set to 1
+
+#include <msp430.h>
+
+#define D2 BIT2
+#define D6 BIT7
+
+#define TOGGLE_BUTTON BIT1
+#define APPLY_BUTTON BIT5
+
+#define HELD_TIME 40000                 // 2 Sec
+#define DEBOUNCE_TIME 1000              // 50 mS
+volatile unsigned int uiTimerTick = 0;  // Timer counter
+
+volatile unsigned int s2State = 0;
+volatile unsigned int s4State = 0;
+
+typedef enum
+{
+    idle,
+    pressed,
+    released,
+    held,
+} DebounceState;
+
+volatile static DebounceState debounceStateToggle = idle;      //Variable called 'debounceStateToggle' of type 'DebounceState' used for debouncing the Toggle button
+volatile static DebounceState debounceStateApply = idle;      //Variable called 'debounceStateApply' of type 'DebounceState' used for debouncing the Apply button
+
+// Timer A1
+void setupTimerA1(void)
+{
+    // Configure DCO to 8 MHz
+    BCSCTL1 |= CALBC1_8MHZ;
+    DCOCTL |= CALDCO_8MHZ;
+
+    TA1CCR0 = 400;                       // Timer period register,   400 / 8MHZ = 50us
+    TA1CTL |= (TASSEL_2 + TACLR + MC_1); // SMCLK, count-up mode
+    TA1CCTL0 |= CCIE;                    // Enable Timer1_A2 CCR0 interrupt
+    __bis_SR_register(GIE);
+}
+
+// TA1CCR0 Register Interrupt
+#pragma vector=TIMER1_A0_VECTOR
+__interrupt void Timer1_A0 (void)
+{
+    uiTimerTick++;  // Interrupt counter, each 'tick'/increment represents 50us
+}
+
 void debounce()
 {
     static unsigned int uiLastTick = 0;
@@ -177,12 +332,11 @@ void processSwitches()
 
 void main(void)
 {
-    /*Debugging, Sets up D2 for testing if needed */
+    //Debugging, Sets up D2 for testing if needed
     P3DIR |= BIT3;
     P3OUT |= BIT3;
     P1DIR |= D2;
     P1OUT &= ~D2;
-    /**/
 
     WDTCTL = WDTPW + WDTHOLD;
     setupTimerA1();
@@ -196,8 +350,10 @@ void main(void)
         processSwitches();
     }
 }
+*/
 
-/*  Toggling done with interrupts, no debouncing    3/4/24
+/*
+Toggling done with interrupts, no debouncing    3/4/24
     #include <msp430.h>
 
     #define BUTTON BIT1
@@ -227,7 +383,6 @@ void main(void)
      P1OUT ^= LED; // P1.0 = toggle
      P2IFG &= ~BUTTON; // P2.1 IFG cleared
     }
+
 */
-
-
 
