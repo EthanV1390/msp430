@@ -128,12 +128,12 @@ void updateDisplay(void)
         break;
         case dispDigit1:
         {
-            if ((TimerTick125 - uiLastTick) >= OFF_TIME)
+            if ((TimerTick125 - uiLastTick) >= DIGIT_OFF_TIME)
                 {
                     P3OUT = ucCharToHex[digit1Val];            // Segment data
                     P1OUT = A1_CTRL;         // Select first digit
                 }
-            if ((TimerTick125 - uiLastTick) >= ON_TIME)
+            if ((TimerTick125 - uiLastTick) >= DIGIT_ON_TIME)
                 {
                     uiLastTick = TimerTick125;
                     dispState = dispDigit2;
@@ -143,12 +143,12 @@ void updateDisplay(void)
         break;
         case dispDigit2:
         {
-            if ((TimerTick125 - uiLastTick) >= OFF_TIME)
+            if ((TimerTick125 - uiLastTick) >= DIGIT_OFF_TIME)
                 {
                     P3OUT = ucCharToHex[digit2Val];            // Segment data
                     P1OUT = A2_CTRL;         // Select second digit
                 }
-            if ((TimerTick125 - uiLastTick) >= ON_TIME)
+            if ((TimerTick125 - uiLastTick) >= DIGIT_ON_TIME)
                 {
                     uiLastTick = TimerTick125;
                     dispState = dispDigit3;
@@ -158,12 +158,12 @@ void updateDisplay(void)
         break;
         case dispDigit3:
         {
-            if ((TimerTick125 - uiLastTick) >= OFF_TIME)
+            if ((TimerTick125 - uiLastTick) >= DIGIT_OFF_TIME)
                 {
                     P3OUT = 0;               // Segment data
                     P1OUT = A3_CTRL;         // Select colon
                 }
-            if ((TimerTick125 - uiLastTick) >= ON_TIME)
+            if ((TimerTick125 - uiLastTick) >= DIGIT_ON_TIME)
                 {
                     uiLastTick = TimerTick125;
                     dispState = dispDigit4;
@@ -173,12 +173,12 @@ void updateDisplay(void)
         break;
         case dispDigit4:
         {
-            if ((TimerTick125 - uiLastTick) >= OFF_TIME)
+            if ((TimerTick125 - uiLastTick) >= DIGIT_OFF_TIME)
                 {
                     P3OUT = ucCharToHex[digit3Val];            // Segment data
                     P1OUT = A4_CTRL;         // Select third digit
                 }
-            if ((TimerTick125 - uiLastTick) >= ON_TIME)
+            if ((TimerTick125 - uiLastTick) >= DIGIT_ON_TIME)
                 {
                     uiLastTick = TimerTick125;
                     dispState = dispDigit5;
@@ -188,12 +188,12 @@ void updateDisplay(void)
         break;
         case dispDigit5:
         {
-            if ((TimerTick125 - uiLastTick) >= OFF_TIME)
+            if ((TimerTick125 - uiLastTick) >= DIGIT_OFF_TIME)
                 {
                     P3OUT = ucCharToHex[digit4Val];            // Segment data
                     P1OUT = A5_CTRL;         // Select fifth digit
                 }
-            if ((TimerTick125 - uiLastTick) >= ON_TIME)
+            if ((TimerTick125 - uiLastTick) >= DIGIT_ON_TIME)
                 {
                     uiLastTick = TimerTick125;
                     dispState = dispDigit1;
