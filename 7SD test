@@ -56,7 +56,8 @@ typedef enum
 } DisplayState;
 
 volatile static DisplayState dispState = dispInit;      //Variable called 'dispState' of type 'DisplayState' used for changing digits on 7SD. dispInit sets UpdateDisplay() to default
-volatile unsigned int uiTimerTick = 0;                  //Timer counter
+volatile unsigned int TimerTick250 = 0;                  //Timer counter
+volatile unsigned int TimerTick125 = 0;                  //Timer counter
 
 //Variables for easily setting a digit's character from ucCharToHex[]
 volatile static int digit1Val = 14;
@@ -64,25 +65,50 @@ volatile static int digit2Val = 17;
 volatile static int digit3Val = 18;
 volatile static int digit4Val = 19;
 
+#define DIGIT_ON_TIME 4
+#define DIGIT_OFF_TIME 1
 
-// Setup function for Timer1
-void SetupTimerA1(void)
+
+// Setup function for TimerA1
+void setupTimerA1(void)
 {
   TA1CTL = TACLR;                       // Stop the timer and clear it first
-  TA1CCR0 = 400;                        // Timer period register,   400 / 8MHZ = 50us
+
+  TA1CCR0 = 2000;                        // Timer period register,   2000 / 8MHZ = 250us
+  TA1CCR1 = 1000;                        // Timer period register,   1000 / 8MHZ = 150us
+
   TA1CTL = TASSEL_2 + MC_1;             // SMCLK, count-up mode
+
   TA1CCTL0 = CCIE;                      // Enable Timer1_A2 CCR0 interrupt
+  TA1CCTL1 = CCIE;                      // Enable Timer1_A2 CCR1 interrupt
   __bis_SR_register(GIE);
 }
 
-// Timer1, TA1CCR0 Register Interrupt
+// TimerA1, TA1CCR0 Register Interrupt
 #pragma vector=TIMER1_A0_VECTOR
 __interrupt void Timer1_A0 (void)
 {
-    uiTimerTick++;                      // Every interrupt increment counter, used for how long an individual digit should be on/off
+    TimerTick250++;                      // Every interrupt increment counter, used for how long an individual digit should be on/off
+    TimerTick125++;
+
 }
 
-void UpdateDisplay(void)
+// TimerA1, TA1CCR1 Register Interrupt
+#pragma vector=TIMER1_A1_VECTOR
+__interrupt void Timer1_A1(void)
+{
+  switch (__even_in_range(TA1IV, 10))        // Efficient switch-implementation
+  {
+    case  2:
+    {
+        TimerTick125++;
+    }
+    break;
+  }
+
+}
+
+void updateDisplay(void)
 {
     static unsigned int uiLastTick = 0; // Timer counter to compare against uiTimerTick for waiting
     switch (dispState)
@@ -92,7 +118,7 @@ void UpdateDisplay(void)
         {
             P1OUT &= ~(A1_CTRL | A2_CTRL | A3_CTRL | A4_CTRL | A5_CTRL);
             P3OUT &= ~(A_CTRL | B_CTRL | C_CTRL | D_CTRL | E_CTRL | F_CTRL | G_CTRL | DP_CTRL);
-            uiLastTick = uiTimerTick;
+            uiLastTick = TimerTick125;
 
             // Set P1 and P3 to output
             P3DIR = 0xFF;
@@ -102,14 +128,14 @@ void UpdateDisplay(void)
         break;
         case dispDigit1:
         {
-            if ((uiTimerTick - uiLastTick) >= 1)
+            if ((TimerTick125 - uiLastTick) >= OFF_TIME)
                 {
                     P3OUT = ucCharToHex[digit1Val];            // Segment data
                     P1OUT = A1_CTRL;         // Select first digit
                 }
-            if ((uiTimerTick - uiLastTick) >= 8)
+            if ((TimerTick125 - uiLastTick) >= ON_TIME)
                 {
-                    uiLastTick = uiTimerTick;
+                    uiLastTick = TimerTick125;
                     dispState = dispDigit2;
                     P1OUT &= ~A1_CTRL;       // Turn off anode 1
                 }
@@ -117,14 +143,14 @@ void UpdateDisplay(void)
         break;
         case dispDigit2:
         {
-            if ((uiTimerTick - uiLastTick) >= 1)
+            if ((TimerTick125 - uiLastTick) >= OFF_TIME)
                 {
                     P3OUT = ucCharToHex[digit2Val];            // Segment data
                     P1OUT = A2_CTRL;         // Select second digit
                 }
-            if ((uiTimerTick - uiLastTick) >= 8)
+            if ((TimerTick125 - uiLastTick) >= ON_TIME)
                 {
-                    uiLastTick = uiTimerTick;
+                    uiLastTick = TimerTick125;
                     dispState = dispDigit3;
                     P1OUT &= ~A2_CTRL;       // Turn off anode 2
                 }
@@ -132,14 +158,14 @@ void UpdateDisplay(void)
         break;
         case dispDigit3:
         {
-            if ((uiTimerTick - uiLastTick) >= 1)
+            if ((TimerTick125 - uiLastTick) >= OFF_TIME)
                 {
                     P3OUT = 0;               // Segment data
                     P1OUT = A3_CTRL;         // Select colon
                 }
-            if ((uiTimerTick - uiLastTick) >= 8)
+            if ((TimerTick125 - uiLastTick) >= ON_TIME)
                 {
-                    uiLastTick = uiTimerTick;
+                    uiLastTick = TimerTick125;
                     dispState = dispDigit4;
                     P1OUT &= ~A3_CTRL;       // Turn off anode 3
                 }
@@ -147,14 +173,14 @@ void UpdateDisplay(void)
         break;
         case dispDigit4:
         {
-            if ((uiTimerTick - uiLastTick) >= 1)
+            if ((TimerTick125 - uiLastTick) >= OFF_TIME)
                 {
                     P3OUT = ucCharToHex[digit3Val];            // Segment data
                     P1OUT = A4_CTRL;         // Select third digit
                 }
-            if ((uiTimerTick - uiLastTick) >= 8)
+            if ((TimerTick125 - uiLastTick) >= ON_TIME)
                 {
-                    uiLastTick = uiTimerTick;
+                    uiLastTick = TimerTick125;
                     dispState = dispDigit5;
                     P1OUT &= ~A4_CTRL;       // Turn off anode 4
                 }
@@ -162,14 +188,14 @@ void UpdateDisplay(void)
         break;
         case dispDigit5:
         {
-            if ((uiTimerTick - uiLastTick) >= 1)
+            if ((TimerTick125 - uiLastTick) >= OFF_TIME)
                 {
                     P3OUT = ucCharToHex[digit4Val];            // Segment data
                     P1OUT = A5_CTRL;         // Select fifth digit
                 }
-            if ((uiTimerTick - uiLastTick) >= 8)
+            if ((TimerTick125 - uiLastTick) >= ON_TIME)
                 {
-                    uiLastTick = uiTimerTick;
+                    uiLastTick = TimerTick125;
                     dispState = dispDigit1;
                     P1OUT &= ~A5_CTRL;       // Turn off anode 5
                 }
@@ -184,10 +210,11 @@ void UpdateDisplay(void)
 void main(void){
 
        WDTCTL = WDTPW | WDTHOLD;
-       SetupTimerA1();
+       setupTimerA1();
 
        while(1)
        {
-           UpdateDisplay();
+           updateDisplay();
        }
 }
+
