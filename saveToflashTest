@@ -1,5 +1,4 @@
 #include <msp430.h> 
-
 /****** Separate timer/Interrupt to ensure flash control is halting and restarting other processes ******/
     volatile unsigned int timerTick125 = 0;
     void setupTimerA1(void) // 125us timer counter
@@ -21,13 +20,20 @@
 /**********************************************************/
 
 #define FLASH_SECTOR_B  (0x1080)    // Address of flash sector B
-#define FLASH_SECTOR_C  (0x1040)    // Address of flash sector C
-#define FLASH_SECTOR_D  (0x1000)    // Address of flash sector D
+#define FLASH_SECTOR_C  (0x1040)    // Address of flash sector C, unused
+#define FLASH_SECTOR_D  (0x1000)    // Address of flash sector D, unused
 
-#define DATA_NUM_BYTES 8
+#define DATA_NUM_BYTES 4    // Array size
 
-int presetFreq[] = {200, 400, 600, 800};    // Starting point, values are written into flash and then stored into 'finalArray[]'
-int finalArray[] = {1, 2, 3, 4};            // Ending point, final values should be read from memory and updated with presetFreq[] values
+float presetFreq[] = {50.5, 123.4, 567.8, 909.9};     // Starting point, values are written into flash and then stored into freqBuffer for int conversion and later stored in 'finalArray[]'
+//float presetFreq[] = {999.9, 999.9, 999.9, 999.9};    // Debug values   Checksum = 9C3C 9,999 = 270F
+
+unsigned int freqBuffer[4];    // Buffer that holds the int values of the starting array (multiplied by 10 and divided by 10 after read from flash)
+//float finalArray[4];            // Ending point, final values should be read from memory (converted back to float if needed) and updated with presetFreq[] values
+
+static unsigned int calcCheckSum = 0;        // Recalculated checkSum value to compare against the checkSum calculated when data is written to flash
+static unsigned int savedCheckSum;           // Saved checksum value
+
 
 typedef enum
 {
@@ -54,6 +60,31 @@ FlashError setupFlash(void) // This routine sets up for a flash erase/write. The
     return (flashError);
 }
 
+void prepForFlash(float array[])
+{
+    char i;
+    for(i = 0; i < 4; i++)
+    {
+        freqBuffer[i] = (unsigned int)(array[i] * 10);
+    }
+}
+
+void unloadFromFlash(unsigned int array[])
+{
+    char i;
+    float floatVal;
+    for(i = 0; i < 4; i++)
+    {
+        floatVal = array[i];
+        presetFreq[i] = (floatVal/10);
+    }
+}
+
+void setDefaults(void)  // This routine sets back to defaults if checkSum check fails
+{
+    // Reset defaults
+}
+
 void startWriteFlash(unsigned int blockAddress) // This routine starts a write cycle for a data block. It erases the block, then sets the write flag to start writing
 {
     unsigned char *eraseByte;                     // Pointer used to erase blocks
@@ -64,12 +95,13 @@ void startWriteFlash(unsigned int blockAddress) // This routine starts a write c
     FCTL1 = FWKEY + WRT;                        // Set WRT bit for write operation
 }
 
-void flashWrite(void) // This routine saves the data to flash. This can cover flash block B and C
+void flashWrite(float array[]) // This routine saves the data to flash. This can cover flash block B and C
 {
-    unsigned char *ramByte;
-    unsigned char *flashByte;
+    unsigned int *ramByte;
+    unsigned int *flashByte;
     unsigned int blockAddress;
     unsigned char byteCount;
+    unsigned int checkSum = 0;  // Local checkSum variable
     FlashError flashError = NO_ERROR;   // Assume no error yet
 
     TA0CCTL0 = 0;   // Halts timer interrupts
@@ -79,16 +111,23 @@ void flashWrite(void) // This routine saves the data to flash. This can cover fl
     if (flashError == NO_ERROR)
     {
         blockAddress = FLASH_SECTOR_B;                      // Set address to use flash sector B for config
+        prepForFlash(array);
         startWriteFlash(blockAddress);                      // Start block write
-        ramByte = (unsigned char*) &presetFreq[0];                   // Initializes ramByte to hold address of data in ram   *ramByte = 100
-        flashByte = (unsigned char*) blockAddress;          // Initializes flashByte to hold address of where data will go in flash
+        ramByte = (unsigned int*) &freqBuffer[0];                   // Initializes ramByte to hold address of data in ram   *ramByte = 100
+        flashByte = (unsigned int*) blockAddress;          // Initializes flashByte to hold address of where data will go in flash
 
         for (byteCount = 0; byteCount < DATA_NUM_BYTES; byteCount++)    // Where the writing takes place
         {
             *flashByte = *ramByte;                   // Copies data at the address of 'ramByte' into the address for 'flashByte' which was just set as the block address in flash
+            checkSum += *ramByte;                    // Calculate checkSum
             flashByte++;                             // Increment the flash address, *flashByte where the next bit of data is stored
             ramByte++;                               // Increment the data address,  *ramByte is where the next bit of data is copied from
         }
+
+        // Save checksum
+        *ramByte = checkSum;        // Sets ramByte to the calculated checkSum value
+        *flashByte = *ramByte;                       // Assigns flash address (One location after data stored)
+        savedCheckSum = *ramByte;                    // Saves checkSum that was just calculated for later checking
 
         FCTL1 = FWKEY;                               // Clear WRT bit
         FCTL3 = FWKEY + LOCK + LOCKA;                // Set all LOCK bits
@@ -97,57 +136,9 @@ void flashWrite(void) // This routine saves the data to flash. This can cover fl
     TA1CCTL0 |= CCIE;    // Re-enable main system ticker interrupts
     TA0CCTL0 |= CCIE;
     setupTimerA1();    // Set clock back
-}
 
-void flashLoad(void)    // This routine loads the data from flash.
-{
-    unsigned char *ramByte;          // Pointer for data in RAM
-    unsigned char *flashByte;        // Pointer for data in Flash
-    unsigned char byteCount;
-
-    flashByte = (unsigned char *) FLASH_SECTOR_B;       // Set address to start of block B in flash, where the data will be read from
-    ramByte = (unsigned char*) &finalArray[0];                   // Set pointer to beginning of where data will go in ram from flash
-
-    for (byteCount = 0; byteCount < DATA_NUM_BYTES; byteCount++)
-    {
-        *ramByte = *flashByte;                          // Get the current byte from flash
-        ramByte++;                                      // Increment the data pointer
-        flashByte++;                                    // Increment the flash pointer
-    }
-}
-
-int main(void)
-{
-	WDTCTL = WDTPW | WDTHOLD;
-	setupTimerA1();
-
-	flashWrite();
-    flashLoad();
-}
-
-
-/*
-
-checkSum code
-
-static unsigned int calcCheckSum = 0;        // Recalculated checkSum value to compare against the checkSum calculated when data is written to flash
-static unsigned int savedCheckSum;           // Saved checksum value
-
-unsigned int checkSum = 0;  // Local checkSum variable inside saveData
-
-checkSum += *ramByte;                    // Calculate checkSum, goes inside write for()
-
-
-Code goes between write for() and resetting lock bits
-        // Save checksum
-        ramByte = (unsigned char*) &checkSum;        // Sets ramByte to the calculated checkSum value
-        *flashByte = *ramByte;                       // Assigns flash address (One location after data stored)
-        savedCheckSum = *ramByte;                    // Saves checkSum that was just calculated for later checking
-
-
-Code goes after restarting the timer
     // Now verify checksum
-    flashByte = (unsigned char *) FLASH_SECTOR_B;    // Set address to use flash sector B for first stat data structure
+    flashByte = (unsigned int *) FLASH_SECTOR_B;    // Set address to use for the start of check (Sector B)
     calcCheckSum = 0;   // Clear calcCheckSum value
 
     for (byteCount = 0; byteCount < DATA_NUM_BYTES; byteCount++)
@@ -159,14 +150,34 @@ Code goes after restarting the timer
     {
         setDefaults();  // If checkSum values aren't the same reset test to default
     }
+}
 
-
-
-void setDefaults(void)  // This routine sets back to defaults if checkSum check fails
+void flashLoad(void)    // This routine loads the data from flash.
 {
-    bufferStoredInFlash = 64;
+    unsigned int *ramByte;          // Pointer for data in RAM
+    unsigned int *flashByte;        // Pointer for data in Flash
+    unsigned char byteCount;
+
+    flashByte = (unsigned int *) FLASH_SECTOR_B;       // Set address to start of block B in flash, where the data will be read from
+    ramByte = (unsigned int*) &freqBuffer[0];                   // Set pointer to beginning of where data will go in ram from flash
+    unloadFromFlash(freqBuffer);
+
+    for (byteCount = 0; byteCount < DATA_NUM_BYTES; byteCount++)
+    {
+        *ramByte = *flashByte;                          // Get the current byte from flash
+        ramByte++;                                      // Increment the data pointer
+        flashByte++;                                    // Increment the flash pointer
+    }
 }
 
 
+int main(void)
+{
+	WDTCTL = WDTPW | WDTHOLD;
+	setupTimerA1();
 
- */
+	flashWrite(presetFreq);
+    flashLoad();
+
+}
+
